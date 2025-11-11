@@ -12,3 +12,5 @@ test*
 *.zip
 build/
 *egg-info/
+
+.cursor
