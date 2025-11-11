@@ -601,6 +601,18 @@ def print_and_discord(
             asyncio.run_coroutine_threadsafe(process_queue(), loop)
 
 
+def debug_print(message: str, prefix: str = "") -> None:
+    """Print debug message only if DEBUG environment variable is enabled.
+    
+    Args:
+        message: The debug message to print
+        prefix: Optional prefix to add before the message (e.g., broker name)
+    """
+    if os.getenv("DEBUG", "false").lower() == "true":
+        prefix_str = f"{prefix}: " if prefix else ""
+        print(f"[DEBUG] {prefix_str}{message}")
+
+
 async def process_queue() -> None:
     """Process the discord queue."""
     while not task_queue.empty():
