@@ -12,3 +12,4 @@ test*
 .vscode/
 *workspace
 *.zip
+.mypy_cache/
