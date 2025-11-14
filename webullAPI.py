@@ -31,6 +31,10 @@ def place_order(obj: webull, account: str, orderObj: stockOrder, s: str):
 
 # Initialize Webull
 def webull_init(WEBULL_EXTERNAL=None):
+    printAndDiscord("WARNING")
+    printAndDiscord("WEBULL IS CURRENTLY NOT SUPPORTED DUE TO API ISSUES.")
+    printAndDiscord("PLEASE PUT # INFRONT OF YOUR WEBULL CREDENTIALS IN THE .ENV FILE TO DISABLE WEBULL FOR NOW.")
+    printAndDiscord("CURRENLTY ONLY HOLDINGS ARE SUPPORTED, WHEN PROPER .ENV VARIABLES ARE SET.")
     # Initialize .env file
     load_dotenv()
     # Import Webull account

@@ -6,7 +6,7 @@ import traceback
 from time import sleep
 
 from dotenv import load_dotenv
-from schwab_api import Schwab
+from schwab_api import Schwab #type: ignore
 
 from helperAPI import Brokerage, maskString, printAndDiscord, printHoldings, stockOrder
 

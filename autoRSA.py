@@ -41,7 +41,7 @@ try:
     from tornadoAPI import *
     from tradierAPI import *
     from vanguardAPI import *
-    from webullAPI import *
+    from webullAPI import * # API ISSUES WHEN TRADING, SEE webullAPI.py FOR DETAILS
     from wellsfargoAPI import *
 except Exception as e:
     print(f"Error importing libraries: {e}")
