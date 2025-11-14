@@ -123,7 +123,7 @@ class stockOrder:
     def get_amount(self) -> float:
         return self.__amount
 
-    def get_stocks(self) -> list:
+    def get_stocks(self) -> list[str]:
         return self.__stock
 
     def get_time(self) -> str:
@@ -352,43 +352,6 @@ class ThreadHandler:
         return self.queue.get()
 
 
-def is_up_to_date(remote, branch):
-    # Assume succeeded in updater()
-    import git
-
-    # Check if local branch is up to date with ls-remote
-    up_to_date = False
-    is_fork = False
-    remote_hash = ""
-    local_commit = git.Repo(".").head.commit.hexsha
-    try:
-        g = git.cmd.Git()
-        ls_remote = g.ls_remote(remote, branch)
-        remote_hash = ls_remote.split("\n")
-        wanted_remote = f"refs/heads/{branch}"
-        for line in remote_hash:
-            if wanted_remote in line:
-                remote_hash = line.split("\t")[0]
-                break
-        if isinstance(remote_hash, list):
-            remote_hash = ""
-            is_fork = True
-            raise Exception(
-                f"Branch {branch} not found in remote {remote}. Perhaps you are on a fork?"
-            )
-        if local_commit == remote_hash:
-            up_to_date = True
-            print(f"You are up to date with {remote}/{branch}")
-    except Exception as e:
-        print(f"Error running ls-remote: {e}")
-    if not up_to_date and not is_fork:
-        if remote_hash == "":
-            remote_hash = "NOT FOUND"
-        print(
-            f"WARNING: YOU ARE OUT OF DATE. Please run 'git pull' to update from {remote}/{branch}. Local hash: {local_commit}, Remote hash: {remote_hash}"
-        )
-    return up_to_date
-
 
 def updater():
     # Check if git is installed
@@ -428,7 +391,6 @@ def updater():
             "UPDATE ERROR: Conflicting changes found. Please commit, stash, or remove your changes before updating."
         )
         print(f"Using commit {str(repo.head.commit)[:7]}")
-        is_up_to_date("origin", repo.active_branch)
         print()
         return
     if not repo.bare:
@@ -442,7 +404,6 @@ def updater():
             print()
             return
     print(f"Update complete! Now using commit {str(repo.head.commit)[:7]}")
-    is_up_to_date("origin", repo.active_branch)
     print()
     return
 

@@ -26,7 +26,6 @@ def firstrade_init(botObj=None, loop=None):
     # Initialize .env file
     load_dotenv()
     if not os.getenv("FIRSTRADE"):
-        print("Firstrade not found, skipping...")
         return None
     accounts = os.environ["FIRSTRADE"].strip().split(",")
     # Log in to Firstrade account

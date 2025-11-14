@@ -32,7 +32,6 @@ def tornado_init(TORNADO_EXTERNAL=None, DOCKER=False, loop=None):
     load_dotenv()
 
     if not os.getenv("TORNADO") and TORNADO_EXTERNAL is None:
-        print("Tornado not found, skipping...")
         return None
 
     if TORNADO_EXTERNAL is None:

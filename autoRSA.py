@@ -32,6 +32,7 @@ try:
         stockOrder,
         updater,
     )
+    from plynkAPI import *
     from publicAPI import *
     from robinhoodAPI import *
     from schwabAPI import *
@@ -59,6 +60,7 @@ SUPPORTED_BROKERS = [
     "fennel",
     "fidelity",
     "firstrade",
+    "plynk",
     "public",
     "robinhood",
     "schwab",
@@ -124,15 +126,7 @@ def fun_run(orderObj: stockOrder, command, botObj=None, loop=None):
             try:
                 # Initialize broker
                 fun_name = broker + first_command
-                if broker.lower() == "wellsfargo":
-                    # Fidelity requires docker mode argument
-                    orderObj.set_logged_in(
-                        globals()[fun_name](
-                            DOCKER=DOCKER_MODE, botObj=botObj, loop=loop
-                        ),
-                        broker,
-                    )
-                elif broker.lower() == "tornado":
+                if broker.lower() == "tornado":
                     # Requires docker mode argument and loop
                     orderObj.set_logged_in(
                         globals()[fun_name](DOCKER=DOCKER_MODE, loop=loop),
@@ -151,7 +145,7 @@ def fun_run(orderObj: stockOrder, command, botObj=None, loop=None):
                     orderObj.set_logged_in(
                         globals()[fun_name](botObj=botObj, loop=loop), broker
                     )
-                elif broker.lower() in ["chase", "fidelity", "sofi", "vanguard"]:
+                elif broker.lower() in ["chase", "fidelity", "sofi", "vanguard", "wellsfargo"]:
                     fun_name = broker + "_run"
                     # PLAYWRIGHT_BROKERS have to run all transactions with one function
                     th = ThreadHandler(
@@ -174,7 +168,7 @@ def fun_run(orderObj: stockOrder, command, botObj=None, loop=None):
                     orderObj.set_logged_in(globals()[fun_name](), broker)
 
                 print()
-                if broker.lower() not in ["chase", "fidelity", "sofi", "vanguard"]:
+                if broker.lower() not in ["chase", "fidelity", "sofi", "vanguard", "wellsfargo"]:
                     # Verify broker is logged in
                     orderObj.order_validate(preLogin=False)
                     logged_in_broker = orderObj.get_logged_in(broker)
@@ -196,13 +190,15 @@ def fun_run(orderObj: stockOrder, command, botObj=None, loop=None):
                             f"All {broker.capitalize()} transactions complete",
                             loop,
                         )
-                # Add to total sum
-                totalValue += sum(
-                    account["total"]
-                    for account in orderObj.get_logged_in(broker)
-                    .get_account_totals()
-                    .values()
-                )
+                logged_in_broker = orderObj.get_logged_in(broker)
+
+                if logged_in_broker is not None:
+                    totalValue += sum(
+                        account["total"]
+                        for account in orderObj.get_logged_in(broker)
+                        .get_account_totals()
+                        .values()
+                    )
             except Exception as ex:
                 print(traceback.format_exc())
                 print(f"Error in {fun_name} with {broker}: {ex}")

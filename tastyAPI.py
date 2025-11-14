@@ -40,7 +40,6 @@ def tastytrade_init(TASTYTRADE_EXTERNAL=None):
     load_dotenv()
     # Import Tastytrade account
     if not os.getenv("TASTYTRADE") and TASTYTRADE_EXTERNAL is None:
-        print("Tastytrade not found, skipping...")
         return None
     accounts = (
         os.environ["TASTYTRADE"].strip().split(",")

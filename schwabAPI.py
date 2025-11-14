@@ -124,6 +124,7 @@ def schwab_transaction(schwab_o: Brokerage, orderObj: stockOrder, loop=None):
                     error_messages = {
                         "One share buy orders for this security must be phoned into a representative.": "Order failed: One share buy orders must be phoned in.",
                         "This order may result in an oversold/overbought position in your account.": "Order failed: This may result in an oversold/overbought position.",
+                        "Your order is not eligible for electronic entry. Please call a Charles Schwab representative at (800) 435-9050 for assistance with this trade.": "Order failed: Stock not elgible for online entry",
                     }
 
                     handled = False

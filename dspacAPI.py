@@ -235,19 +235,51 @@ def dspac_transaction(ds: Brokerage, orderObj: stockOrder, loop=None):
                     is_dry_run = orderObj.get_dry()
                     # Buy
                     if action == "buy":
-                        # Validate the buy transaction
+                        # --- NEW "Check-First" Logic ---
+                        stock_info_response = obj.get_simple_stock_info(s)
+                        
+                        order_type = "MARKET"
+                        entrust_price = None
+
+                        if stock_info_response.get("Data") and stock_info_response["Data"].get("data"):
+                            meta = stock_info_response["Data"]["meta"]
+                            data = stock_info_response["Data"]["data"][0]
+                            
+                            try:
+                                exchange_idx = meta.index("lastExchangeShortName")
+                                price_idx = meta.index("Last")
+                                exchange = data[exchange_idx]
+                                last_price = data[price_idx]
+
+                                if "OTC" in (exchange or ""):
+                                    order_type = "LIMIT"
+                                    entrust_price = last_price
+                                    printAndDiscord(f"{key} {account}: Detected OTC stock. Setting LIMIT order at ${last_price}", loop)
+                                else:
+                                    printAndDiscord(f"{key} {account}: Detected non-OTC stock. Using MARKET order.", loop)
+                            
+                            except (ValueError, IndexError) as e:
+                                printAndDiscord(f"{key} {account}: Could not parse stock info, defaulting to MARKET order. Error: {e}", loop)
+                        
+                        # --- End "Check-First" Logic ---
+
+                        # Proceed to validation with the correct order type
                         validation_response = obj.validate_buy(
                             symbol=s,
                             amount=quantity,
                             order_side=1,
                             account_number=account,
+                            order_type=order_type,
+                            entrust_price=entrust_price
                         )
+
                         if validation_response["Outcome"] != "Success":
                             printAndDiscord(
-                                f"{key} {account}: Validation failed for buying {quantity} of {s}: {validation_response['Message']}",
+                                f"{key} {account}: Validation failed for buying {quantity} of {s}: {validation_response.get('Message', 'Unknown error')}",
                                 loop,
                             )
                             continue
+                            
                         # Proceed to execute the buy if not in dry run mode
                         if not is_dry_run:
                             buy_response = obj.execute_buy(
@@ -255,11 +287,12 @@ def dspac_transaction(ds: Brokerage, orderObj: stockOrder, loop=None):
                                 amount=quantity,
                                 account_number=account,
                                 dry_run=is_dry_run,
+                                validation_response=validation_response # Pass the successful validation
                             )
-                            message = buy_response["Message"]
+                            message = buy_response.get("Message", "No message")
                         else:
-                            message = "Dry Run Success"
-                    # Sell
+                            order_type_msg = validation_response.get("Data", {}).get("type", "UNKNOWN")
+                            message = f"Dry Run Success ({order_type_msg} order)"
                     elif action == "sell":
                         # Check stock holdings before attempting to sell
                         holdings_response = obj.check_stock_holdings(
