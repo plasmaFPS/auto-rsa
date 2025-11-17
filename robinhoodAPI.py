@@ -4,7 +4,7 @@
 import os
 import traceback
 
-import robin_stocks.robinhood as rh
+import robin_stocks.robinhood as rh #type: ignore
 from dotenv import load_dotenv
 
 from helperAPI import Brokerage, maskString, printAndDiscord, printHoldings, stockOrder

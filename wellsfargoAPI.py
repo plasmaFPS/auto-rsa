@@ -432,8 +432,8 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
         await login_button.click()
         
         # Give the page a moment to redirect after login click
-        await browser.sleep(2)
-        await page.select("body")
+        await browser.sleep(4)
+        await page.select("body", timeout=20)
 
         current_url = await get_current_url(page, discord_loop)
 

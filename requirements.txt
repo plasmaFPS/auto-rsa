@@ -11,7 +11,8 @@ firstrade==0.0.34
 GitPython==3.1.45
 -e git+https://github.com/MaxxRK/playwright_stealth@64856026a91e85f7639c17ddc9cad42496233da9#egg=playwright_stealth
 -e git+https://github.com/matthew55/Plynk-API@420fad935b726e869d10de1304f399b85c566613#egg=plynk_api
-publicdotcom-py==0.1.4
+#publicdotcom-py==0.1.4
+-e git+https://github.com/ImNotOssy/publicdotcom-py.git@643dfd9962c97529ed0b7953b9eaef8599e973d9#egg=publicdotcom-py
 pyotp==2.9.0
 python-dotenv==1.2.1
 requests==2.32.5

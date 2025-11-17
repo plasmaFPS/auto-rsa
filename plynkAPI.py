@@ -5,7 +5,7 @@ import os
 import traceback
 
 from dotenv import load_dotenv
-from plynk_api import Plynk
+from plynk_api import Plynk #type: ignore
 
 from helperAPI import (
     Brokerage,

@@ -6,7 +6,7 @@ from datetime import datetime, time
 import pytz
 
 from dotenv import load_dotenv
-from public_api_sdk import (
+from public_api_sdk import ( #type: ignore
     InstrumentType,
     OrderExpirationRequest,
     OrderInstrument,
@@ -19,7 +19,7 @@ from public_api_sdk import (
     OrderType,
     TimeInForce,
 )
-from public_api_sdk.auth_config import ApiKeyAuthConfig
+from public_api_sdk.auth_config import ApiKeyAuthConfig #type: ignore
 from email_validator import validate_email, EmailNotValidError
 
 from helperAPI import (
