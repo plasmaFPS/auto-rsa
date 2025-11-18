@@ -22,7 +22,7 @@ from helperAPI import (
 
 
 def fidelity_run(
-    orderObj: stockOrder, command=None, botObj=None, loop=None, FIDELITY_EXTERNAL=None
+    orderObj: stockOrder, command=None, botObj=None, loop=None, FIDELITY_EXTERNAL=None, DOCKER=False, **kwargs
 ):
     """
     Entry point from main function. Gathers credentials and go through commands for
@@ -42,8 +42,14 @@ def fidelity_run(
         if FIDELITY_EXTERNAL is None
         else FIDELITY_EXTERNAL.strip().split(",")
     )
-    # Get headless flag
-    headless = os.getenv("HEADLESS", "true").lower() == "true"
+    # LOGIC CHANGE HERE:
+    # If DOCKER is True, force headless to False (uses Xvfb)
+    # Otherwise, use the env variable or default to True
+    if DOCKER:
+        print("Fidelity: Running in Docker mode (Non-Headless)")
+        headless = False
+    else:
+        headless = os.getenv("HEADLESS", "true").lower() == "true"
     # Set the functions to be run
     _, second_command = command
 
