@@ -328,7 +328,6 @@ async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_popula
             elif headless:
                 browser_args.append("--headless=new")
                 browser_args.append("--window-size=1920,1080")
-            browser_args.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
 
             log("Starting browser...")
             browser = await uc.start(browser_args=browser_args)
@@ -409,10 +408,10 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
         log(f"2FA phone suffix: {'Provided' if phone_suffix_for_2fa else 'Not provided'}")
 
         log("Navigating to Wells Fargo Advisors homepage.")
-        await page.get("https://www.wellsfargoadvisors.com/")
+        await page.get("https://www.wellsfargoadvisors.com/online-access/signon.htm")
         await load_cookies_from_pkl(browser, page, cookie_filename)
         await page.reload()
-        await page.get("https://www.wellsfargoadvisors.com/")
+        await page.get("https://www.wellsfargoadvisors.com/online-access/signon.htm")
 
         log("Locating and filling username field.")
         await browser.sleep(2)
