@@ -43,6 +43,7 @@ try:
     from vanguardAPI import *
     from webullAPI import * # API ISSUES WHEN TRADING, SEE webullAPI.py FOR DETAILS
     from wellsfargoAPI import *
+    from historyAPI import save_history, get_history_report
 except Exception as e:
     print(f"Error importing libraries: {e}")
     print(traceback.format_exc())
@@ -217,6 +218,9 @@ def fun_run(orderObj: stockOrder, command, botObj=None, loop=None):
                         .get_account_totals()
                         .values()
                     )
+                    # Save history
+                    if "_holdings" in command:
+                        save_history(logged_in_broker)
             except Exception as ex:
                 print(traceback.format_exc())
                 print(f"Error in {fun_name} with {broker}: {ex}")
@@ -318,6 +322,9 @@ if __name__ == "__main__":
         check_package_versions()
         print("Running bot from command line")
         print()
+        if sys.argv[1].lower() == "history":
+            print(get_history_report())
+            sys.exit(0)
         cliOrderObj = argParser(sys.argv[1:])
         if not cliOrderObj.get_holdings():
             print(f"Action: {cliOrderObj.get_action()}")
@@ -400,6 +407,7 @@ if __name__ == "__main__":
                 "Available RSA commands:\n"
                 "!ping\n"
                 "!help\n"
+                "!rsa history\n"
                 "!rsa holdings [all|<broker1>,<broker2>,...] [not broker1,broker2,...]\n"
                 "!rsa [buy|sell] [amount] [stock1|stock1,stock2] [all|<broker1>,<broker2>,...] [not broker1,broker2,...] [DRY: true|false]\n"
                 "!restart"
@@ -408,6 +416,158 @@ if __name__ == "__main__":
         # Main RSA command
         @bot.command(name="rsa")
         async def rsa(ctx, *args):
+            if args and args[0].lower() == "history":
+                from historyAPI import get_history_data
+                data = await bot.loop.run_in_executor(None, get_history_data)
+                
+                if data is None:
+                    await ctx.send("No history data found.")
+                    return
+                if not data:
+                    await ctx.send("History file is empty.")
+                    return
+
+                # Parse arguments
+                mode = "summary" # default
+                target_brokers = []
+                
+                if len(args) > 1:
+                    if args[1].lower() == "all":
+                        mode = "detailed"
+                    else:
+                        mode = "detailed"
+                        target_brokers = [b.strip().lower() for b in args[1].split(",")]
+                        # Handle nicknames
+                        target_brokers = [nicknames(b) for b in target_brokers]
+
+                embeds_to_send = []
+                current_embed = discord.Embed(
+                    title="Account Performance Tracking",
+                    color=3447003
+                )
+                field_count = 0
+
+                # Process Data
+                items_to_display = []
+                
+                if mode == "summary":
+                    # Aggregate by broker
+                    broker_totals = {}
+                    for acc in data["accounts"]:
+                        broker = acc["broker"]
+                        if broker not in broker_totals:
+                            broker_totals[broker] = {
+                                "current_val": 0,
+                                "diff_1d": 0,
+                                "diff_30d": 0,
+                                "has_1d": False,
+                                "has_30d": False
+                            }
+                        
+                        broker_totals[broker]["current_val"] += acc["current_val"]
+                        if acc["has_1d"]:
+                            broker_totals[broker]["diff_1d"] += acc["diff_1d"]
+                            broker_totals[broker]["has_1d"] = True
+                        if acc["has_30d"]:
+                            broker_totals[broker]["diff_30d"] += acc["diff_30d"]
+                            broker_totals[broker]["has_30d"] = True
+                    
+                    for broker, totals in broker_totals.items():
+                        items_to_display.append({
+                            "name": broker,
+                            "current_val": totals["current_val"],
+                            "diff_1d": totals["diff_1d"],
+                            "diff_30d": totals["diff_30d"],
+                            "has_1d": totals["has_1d"],
+                            "has_30d": totals["has_30d"]
+                        })
+                        
+                else: # Detailed mode (all or filtered)
+                    for acc in data["accounts"]:
+                        if target_brokers and acc["broker"].lower() not in target_brokers:
+                            # Try checking if the target broker is a substring of the account broker (e.g. "Schwab 1" vs "schwab")
+                            # Or if the nickname mapping was correct but the data has full names.
+                            # The data["accounts"] has "broker" field which comes from Brokerage.get_name().
+                            # In schwabAPI.py, it sets name as "Schwab {index}".
+                            # So "schwab" won't match "Schwab 1".
+                            
+                            # Let's try a more flexible match:
+                            # 1. Exact match (already tried)
+                            # 2. Starts with (e.g. "Schwab" matches "Schwab 1")
+                            
+                            match = False
+                            acc_broker_lower = acc["broker"].lower()
+                            for tb in target_brokers:
+                                if tb in acc_broker_lower: # "schwab" in "schwab 1" -> True
+                                    match = True
+                                    break
+                            
+                            if not match:
+                                continue
+                            
+                        items_to_display.append({
+                            "name": f"{acc['broker']} - {maskString(acc['account'])}",
+                            "current_val": acc["current_val"],
+                            "diff_1d": acc["diff_1d"],
+                            "diff_30d": acc["diff_30d"],
+                            "has_1d": acc["has_1d"],
+                            "has_30d": acc["has_30d"]
+                        })
+
+                if not items_to_display:
+                     await ctx.send("No accounts found matching criteria.")
+                     return
+
+                # Build Embeds
+                for item in items_to_display:
+                    if field_count >= 24:
+                        embeds_to_send.append(current_embed)
+                        current_embed = discord.Embed(
+                            title="Account Performance Tracking (Cont.)",
+                            color=3447003
+                        )
+                        field_count = 0
+                    
+                    diff_1d_str = "N/A"
+                    if item["has_1d"]:
+                        sign = "+" if item["diff_1d"] >= 0 else "-"
+                        diff_1d_str = f"{sign}${abs(item['diff_1d']):.2f}"
+                        
+                    diff_30d_str = "N/A"
+                    if item["has_30d"]:
+                        sign = "+" if item["diff_30d"] >= 0 else "-"
+                        diff_30d_str = f"{sign}${abs(item['diff_30d']):.2f}"
+                    
+                    field_value = f"Current: ${item['current_val']:.2f}\n1 Day: {diff_1d_str}\n30 Days: {diff_30d_str}"
+                    current_embed.add_field(
+                        name=item["name"],
+                        value=field_value,
+                        inline=False
+                    )
+                    field_count += 1
+                
+                # Add Total Portfolio
+                if field_count >= 25:
+                    embeds_to_send.append(current_embed)
+                    current_embed = discord.Embed(
+                        title="Account Performance Tracking (Summary)",
+                        color=3447003
+                    )
+                
+                sign_day = "+" if data["total_day_diff"] >= 0 else "-"
+                sign_month = "+" if data["total_month_diff"] >= 0 else "-"
+                
+                current_embed.add_field(
+                    name="Total Portfolio",
+                    value=f"Value: ${data['total_current']:.2f}\n1 Day Change: {sign_day}${abs(data['total_day_diff']):.2f}\n30 Day Change: {sign_month}${abs(data['total_month_diff']):.2f}",
+                    inline=False
+                )
+                embeds_to_send.append(current_embed)
+                
+                for embed in embeds_to_send:
+                    await ctx.send(embed=embed)
+                return
+
             discOrdObj = await bot.loop.run_in_executor(None, argParser, args)
             event_loop = asyncio.get_event_loop()
             try:
