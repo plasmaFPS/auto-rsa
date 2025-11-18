@@ -36,12 +36,17 @@ WORKDIR /app
 
 # Install other dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium \
-    chromium-driver \
+    wget \
+    gnupg \
+    ca-certificates \
     git \
     tzdata \
     xvfb \
-&& rm -rf /var/lib/apt/lists/*
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub > /usr/share/keyrings/google-chrome-keyring.asc \
+    && sh -c 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.asc] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list' \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
 COPY --from=builder /opt/venv /opt/venv

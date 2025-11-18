@@ -145,7 +145,7 @@ async def get_current_url(page, discord_loop):
 
 
 def sofi_run(
-    orderObj: stockOrder, command=None, botObj=None, loop=None, SOFI_EXTERNAL=None
+    orderObj: stockOrder, command=None, botObj=None, loop=None, SOFI_EXTERNAL=None, DOCKER=False
 ):
     print("Starting SoFi run process...")
     load_dotenv()
@@ -179,11 +179,22 @@ def sofi_run(
             cookie_filename = f"{COOKIES_PATH}/{name}.pkl"
 
             browser_args = []
-            if headless:
+            
+            if DOCKER:
+                # Docker-specific args for zendriver/Chrome
+                # We DO NOT use --headless here, as we are running in Xvfb (DISPLAY=:99)
+                # This is much stealthier than --headless=new
+                browser_args.append("--no-sandbox")
+                browser_args.append("--disable-dev-shm-usage")
+                browser_args.append("--disable-gpu")
+                browser_args.append("--window-size=1920,1080")
+            elif headless:
+                # Standard headless for local runs
                 browser_args.append("--headless=new")
                 browser_args.append("--window-size=1920,1080")
-                browser_args.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
-                
+            
+            # Common args
+            browser_args.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
 
             print(f"Starting browser for account {name}...")
             browser = sofi_loop.run_until_complete(uc.start(browser_args=browser_args))

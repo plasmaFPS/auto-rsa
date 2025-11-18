@@ -103,7 +103,7 @@ async def get_current_url(page, discord_loop):
         return None
 
 
-def wellsfargo_run(orderObj=None, command=None, botObj=None, loop=None, WELLSFARGO_EXTERNAL=None, **kwargs):
+def wellsfargo_run(orderObj=None, command=None, botObj=None, loop=None, WELLSFARGO_EXTERNAL=None, DOCKER=False, **kwargs):
     """
     Main function to run Wells Fargo operations using asyncio.
     This function itself is synchronous and designed to be called from a synchronous context (like autoRSA's fun_run).
@@ -144,7 +144,8 @@ def wellsfargo_run(orderObj=None, command=None, botObj=None, loop=None, WELLSFAR
                 action_to_perform,
                 botObj,
                 discord_loop,
-                orderObj
+                orderObj,
+                DOCKER
             )
         )
         
@@ -305,7 +306,7 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
         raise Exception(f"Error during Wells Fargo 2FA process: {e}")
 
 
-async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_populate: Brokerage, action_to_perform, botObj, discord_loop, orderObj):
+async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_populate: Brokerage, action_to_perform, botObj, discord_loop, orderObj, DOCKER=False):
     headless = os.getenv("HEADLESS", "true").lower() == "true"
     print(f"Headless mode is {'enabled' if headless else 'disabled'}.")
     log(f"Headless mode: {headless}")
@@ -319,10 +320,15 @@ async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_popula
 
         try:
             browser_args = []
-            if headless:
+            if DOCKER:
+                browser_args.append("--no-sandbox")
+                browser_args.append("--disable-dev-shm-usage")
+                browser_args.append("--disable-gpu")
+                browser_args.append("--window-size=1920,1080")
+            elif headless:
                 browser_args.append("--headless=new")
                 browser_args.append("--window-size=1920,1080")
-                browser_args.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
+            browser_args.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
 
             log("Starting browser...")
             browser = await uc.start(browser_args=browser_args)

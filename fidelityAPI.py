@@ -9,7 +9,7 @@ import os
 import traceback
 
 from dotenv import load_dotenv
-from fidelity import fidelity
+from fidelity import fidelity #type: ignore
 
 from helperAPI import (
     Brokerage,
