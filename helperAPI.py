@@ -635,42 +635,77 @@ async def processQueue():
         task_queue.task_done()
 
 
-async def getOTPCodeDiscord(
-    botObj: commands.Bot, brokerName, code_len=6, timeout=60, loop=None
-):
-    printAndDiscord(f"{brokerName} requires OTP code", loop)
-    printAndDiscord(
-        f"Please enter OTP code or type cancel within {timeout} seconds", loop
-    )
-    # Get OTP code from Discord
-    while True:
-        try:
-            code = await botObj.wait_for(
-                "message",
-                # Ignore bot messages and messages not in the correct channel
-                check=lambda m: m.author != botObj.user
-                and m.channel.id == int(os.getenv("DISCORD_CHANNEL")),
-                timeout=timeout,
+async def getOTPCodeDiscord(botObj: commands.Bot, brokerName, code_len=None, timeout=300, loop=None):
+    # 1. Auto-detect 8-digit requirement for Chase, default to 6 for others
+    if code_len is None:
+        if "chase" in brokerName.lower():
+            expected_len = 8
+        else:
+            expected_len = 6
+    else:
+        expected_len = code_len
+
+    # Message to send to user
+    prompt_msg = f"**[{brokerName}]** requires an OTP Code (Expected: {expected_len} digits).\nPlease type it here within {timeout} seconds."
+    
+    # 2. Send the prompt message (Thread-Safe)
+    if loop:
+        # If we are in a separate thread, schedule the print on the main loop
+        asyncio.run_coroutine_threadsafe(
+            printAndDiscord(prompt_msg, loop=loop), 
+            loop
+        )
+    else:
+        # If we are on the main loop, just await it
+        await printAndDiscord(prompt_msg)
+
+    # Filter for the Discord message
+    def check(m):
+        return m.author != botObj.user and m.channel.id == int(os.getenv("DISCORD_CHANNEL"))
+
+    try:
+        # 3. Wait for the user's reply (Thread-Safe Bridge)
+        if loop and loop != asyncio.get_running_loop():
+            # CRITICAL: We are in a thread. Ask the main loop to wait for the message.
+            future = asyncio.run_coroutine_threadsafe(
+                botObj.wait_for("message", check=check, timeout=timeout),
+                loop
             )
-        except asyncio.TimeoutError:
-            printAndDiscord(
-                f"Timed out waiting for OTP code input for {brokerName}", loop
-            )
+            # This blocks the thread until the main loop gets the message
+            code_message = future.result() 
+        else:
+            # We are on the main loop, standard await
+            code_message = await botObj.wait_for("message", check=check, timeout=timeout)
+
+        code_text = code_message.content.strip()
+        
+        # 4. Validation
+        if code_text.lower() == "cancel":
+            if loop:
+                asyncio.run_coroutine_threadsafe(printAndDiscord(f"Cancelling OTP for {brokerName}", loop), loop)
+            else:
+                await printAndDiscord(f"Cancelling OTP for {brokerName}")
             return None
-        if code.content.lower() == "cancel":
-            printAndDiscord(f"Cancelling OTP code for {brokerName}", loop)
-            return None
-        try:
-            # Check if code is numbers only
-            int(code.content)
-        except ValueError:
-            printAndDiscord("OTP code must be numbers only", loop)
-            continue
-        # Check if code is correct length
-        if len(code.content) != code_len:
-            printAndDiscord(f"OTP code must be {code_len} digits", loop)
-            continue
-        return code.content
+            
+        # Basic digit check (optional, but good for UX)
+        if not code_text.isdigit():
+            err_msg = "OTP code must be numbers only. Please try again."
+            if loop:
+                asyncio.run_coroutine_threadsafe(printAndDiscord(err_msg, loop), loop)
+            else:
+                await printAndDiscord(err_msg)
+            # Recursively try again or return None (returning None is safer to avoid infinite loops)
+            return None 
+            
+        return code_text
+
+    except Exception as e:
+        err_msg = f"Timed out or Error waiting for OTP for {brokerName}: {e}"
+        if loop:
+            asyncio.run_coroutine_threadsafe(printAndDiscord(err_msg, loop), loop)
+        else:
+            await printAndDiscord(err_msg)
+        return None
 
 
 async def getUserInputDiscord(botObj: commands.Bot, prompt, timeout=60, loop=None):

@@ -233,99 +233,173 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
 
     # 1. Enter Credentials
     try:
-        user_box = await page.find("#userId-input-field-input", timeout=10) or await find_shadow_element(page, "#userId-input-field-input")
-        pass_box = await page.find("#password-input-field-input", timeout=10) or await find_shadow_element(page, "#password-input-field-input")
+        user_box = await safe_find(page, "#userId-input-field-input", timeout=5)
+        pass_box = await safe_find(page, "#password-input-field-input", timeout=5)
         
         if user_box and pass_box:
             await user_box.clear_input_by_deleting()
             await user_box.send_keys(username)
             await pass_box.send_keys(password)
-            btn = await page.find("#signin-button", timeout=5) or await find_shadow_element(page, "#signin-button")
-            await btn.click()
+            btn = await safe_find(page, "#signin-button", timeout=5)
+            if btn: await btn.click()
             await page.sleep(5)
-    except Exception:
-        pass
+    except Exception as e:
+        log(f"Cred entry error (ignorable if logged in): {e}")
 
-    # 2. Check for "We don't recognize this device" Dropdown
-    if "dashboard" not in page.url:
-        try:
-            # Check for the styled dropdown trigger "Choose one"
-            dropdown_trigger = await page.find("#header-simplerAuth-dropdownoptions-styledselect", timeout=5)
+    # 2FA LOOP: Check for various 2FA screens
+    max_retries = 20 # Increased retries to handle slow page loads
+    for i in range(max_retries):
+        if "dashboard" in page.url: return True
+        if "esasiOptout" in page.url: return True
+        
+        log(f"2FA Check Cycle {i+1}/{max_retries}...")
+
+        # Method 1: List Item (Get a text vs Get a call)
+        list_sms = await safe_find(page, "#sms", timeout=2)
+        if list_sms:
+            log("Handling 'Confirm Identity' (List Mode)...")
+            await handle_list_verification(page)
+            await page.sleep(3)
+            continue
+
+        # Method 2: Radio Button (Choose phone number)
+        radio_group = await safe_find(page, "#eligibleTextContacts", timeout=2)
+        if radio_group:
+            log("Handling 'Confirm Identity' (Radio Mode)...")
+            await handle_radio_verification(page)
+            await page.sleep(3)
+            continue
+
+        # Method 3: Dropdown (Unrecognized Device)
+        dropdown = await safe_find(page, "#header-simplerAuth-dropdownoptions-styledselect", timeout=2)
+        if dropdown:
+            log("Handling 'Unrecognized Device' (Dropdown Mode)...")
+            await handle_dropdown_verification(page)
+            await page.sleep(3)
+            continue
+
+        # Method 4: OTP Input
+        otp_input = await safe_find(page, "#otpInput", timeout=2)
+        if otp_input:
+            log("Handling OTP Input...")
+            if botObj is None:
+                print(f"\n[ACTION REQUIRED] Enter Chase 2FA Code for {name}: ")
+                code = await asyncio.get_event_loop().run_in_executor(None, input)
+            else:
+                code = await getOTPCodeDiscord(botObj, name, code_len=8, timeout=300, loop=discord_loop)
             
-            if dropdown_trigger:
-                log("Found 'Unrecognized Device' dropdown. Handling...")
-                try: await dropdown_trigger.click()
-                except: await js_click(dropdown_trigger)
-                await page.sleep(1)
-                
-                list_container = await page.find("#ul-list-container-simplerAuth-dropdownoptions-styledselect")
-                if list_container:
-                    # Find all option elements
-                    options = await list_container.query_selector_all("a.option")
-                    target_option = None
-                    
-                    for opt in options:
-                        class_attr = await opt.get_attribute("class")
-                        if "groupLabelContainer" in class_attr:
-                            continue # Skip labels like "TEXT ME" or "CALL ME"
-                        
-                        # --- UPDATED LOGIC ---
-                        # Immediately select the first available option (which is always "Text Me")
-                        # ignoring any last_four matching logic.
-                        log(f"Selecting first available option: {await opt.text_content()}")
-                        target_option = opt
-                        break
-                    
-                    if target_option:
-                        try: await target_option.click()
-                        except: await js_click(target_option)
-                        await page.sleep(1)
-                        
-                        # Click Next to send the code
-                        request_code_btn = await page.find("#requestIdentificationCode")
-                        if request_code_btn:
-                            try: await request_code_btn.click()
-                            except: await js_click(request_code_btn)
-                            await page.sleep(2)
-        except Exception as e:
-             log(f"Error handling Unrecognized Device dropdown: {e}")
-
-    # 3. Standard 2FA Handling (Radio Buttons / Input)
-    if "dashboard" not in page.url:
-        log("Checking for Standard 2FA...")
-        try:
-            sms_opt = await page.find("#sms", timeout=3) or await find_shadow_element(page, "#sms")
-            if sms_opt:
-                try: await sms_opt.click()
-                except: await js_click(sms_opt)
-                await page.sleep(1)
-                
-                next_btn = await page.find("#next-content", timeout=3) or await find_shadow_element(page, "#next-content")
+            if code:
+                await otp_input.send_keys(str(code))
+                next_btn = await safe_find(page, "#next-content", timeout=5)
                 if next_btn:
                     try: await next_btn.click()
                     except: await js_click(next_btn)
+                await page.sleep(5)
+            continue
+        
+        await page.sleep(1)
 
-            otp_input = await page.find("#otpInput", timeout=10) or await find_shadow_element(page, "#otpInput")
-            if otp_input:
-                if botObj is None:
-                    print(f"\n[ACTION REQUIRED] Enter Chase 2FA Code for {name}: ")
-                    code = await asyncio.get_event_loop().run_in_executor(None, input)
-                else:
-                    code = await getOTPCodeDiscord(botObj, name, timeout=300, loop=discord_loop)
-                
-                if code:
-                    await otp_input.send_keys(str(code))
-                    next_btn = await page.find("#next-content", timeout=5) or await find_shadow_element(page, "#next-content")
-                    if next_btn:
-                        try: await next_btn.click()
-                        except: await js_click(next_btn)
-                    await page.sleep(5)
-        except Exception as e:
-            log(f"2FA Logic Error: {e}")
-
-    if "dashboard" in page.url: return True
-    if "esasiOptout" in page.url: return True
     return "dashboard" in page.url
+
+# --- Helpers for finding elements safely ---
+async def safe_find(page, selector, timeout=3):
+    try:
+        return await page.find(selector, timeout=timeout)
+    except:
+        return None
+
+# --- 2FA Handlers (Using robust JS execution) ---
+
+async def handle_list_verification(page):
+    """Handles the 'Get a text' list item selection."""
+    try:
+        # Use JS to click directly, bypassing Element object issues
+        await page.evaluate("""
+            (function() {
+                var el = document.querySelector('#sms');
+                if (el) el.click();
+            })();
+        """)
+        log("Clicked #sms via JS")
+        
+        await page.sleep(1)
+        
+        # Click Next button if it exists
+        await page.evaluate("""
+            (function() {
+                var btn = document.querySelector('#next-content');
+                if (btn) btn.click();
+            })();
+        """)
+        log("Clicked #next-content via JS (if present)")
+
+    except Exception as e:
+        log(f"Error in list handler: {e}")
+
+async def handle_radio_verification(page):
+    """Handles the 'Choose your mobile number' radio selection."""
+    try:
+        # Click the first label that looks like a phone number mask
+        await page.evaluate("""
+            (function() {
+                var labels = document.querySelectorAll('label');
+                for (var i = 0; i < labels.length; i++) {
+                    if (labels[i].textContent.includes('xxx-')) {
+                        labels[i].click();
+                        break;
+                    }
+                }
+            })();
+        """)
+        log("Clicked phone number radio via JS")
+        
+        await page.sleep(1)
+        
+        await page.evaluate("""
+            (function() {
+                var btn = document.querySelector('#next-content');
+                if (btn) btn.click();
+            })();
+        """)
+        log("Clicked #next-content via JS")
+
+    except Exception as e:
+        log(f"Error in radio handler: {e}")
+
+async def handle_dropdown_verification(page):
+    """Handles the 'We don't recognize this device' dropdown."""
+    try:
+        await page.evaluate("""
+            (function() {
+                var trigger = document.querySelector('#header-simplerAuth-dropdownoptions-styledselect');
+                if (trigger) trigger.click();
+            })();
+        """)
+        await page.sleep(1)
+        
+        # Select first option in dropdown
+        await page.evaluate("""
+            (function() {
+                var options = document.querySelectorAll('#ul-list-container-simplerAuth-dropdownoptions-styledselect a.option');
+                for (var i = 0; i < options.length; i++) {
+                    if (!options[i].className.includes('groupLabelContainer')) {
+                        options[i].click();
+                        break;
+                    }
+                }
+            })();
+        """)
+        
+        await page.sleep(1)
+        
+        await page.evaluate("""
+            (function() {
+                var btn = document.querySelector('#requestIdentificationCode');
+                if (btn) btn.click();
+            })();
+        """)
+    except Exception as e:
+        log(f"Error in dropdown handler: {e}")
 
 async def navigate_to_trade_context(page):
     """Navigates to the trade entry page to prime session cookies."""
