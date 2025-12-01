@@ -258,36 +258,25 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
                 except: await js_click(dropdown_trigger)
                 await page.sleep(1)
                 
-                # The options appear in a list container
-                # We need to traverse the options and find the best match (SMS)
                 list_container = await page.find("#ul-list-container-simplerAuth-dropdownoptions-styledselect")
                 if list_container:
-                    # Find all links that act as options
-                    # We look for the <a> tag with class "option" that is NOT a "groupLabelContainer"
-                    # The HTML structure: 
-                    # <li role="presentation"><a class="option js-option lastGroupItem STYLED_SELECT" ...><span class="primary groupingName">xxx-xxx-8088</span>...</a></li>
-                    
+                    # Find all option elements
                     options = await list_container.query_selector_all("a.option")
                     target_option = None
                     
                     for opt in options:
                         class_attr = await opt.get_attribute("class")
                         if "groupLabelContainer" in class_attr:
-                            continue # Skip labels like "TEXT ME"
+                            continue # Skip labels like "TEXT ME" or "CALL ME"
                         
-                        text_content = await opt.text_content()
-                        
-                        # If we have a last_four match, prioritize it
-                        if last_four and last_four in text_content:
-                            target_option = opt
-                            break
-                        
-                        # Fallback: Capture the first valid option if we haven't found a match yet
-                        if not target_option:
-                            target_option = opt
+                        # --- UPDATED LOGIC ---
+                        # Immediately select the first available option (which is always "Text Me")
+                        # ignoring any last_four matching logic.
+                        log(f"Selecting first available option: {await opt.text_content()}")
+                        target_option = opt
+                        break
                     
                     if target_option:
-                        log(f"Selecting verification option: {await target_option.text_content()}")
                         try: await target_option.click()
                         except: await js_click(target_option)
                         await page.sleep(1)
