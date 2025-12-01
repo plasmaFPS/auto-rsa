@@ -231,6 +231,7 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
         log("Already logged in.")
         return True
 
+    # 1. Enter Credentials
     try:
         user_box = await page.find("#userId-input-field-input", timeout=10) or await find_shadow_element(page, "#userId-input-field-input")
         pass_box = await page.find("#password-input-field-input", timeout=10) or await find_shadow_element(page, "#password-input-field-input")
@@ -245,9 +246,64 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
     except Exception:
         pass
 
-    # 2FA Handling
+    # 2. Check for "We don't recognize this device" Dropdown
     if "dashboard" not in page.url:
-        log("Checking for 2FA...")
+        try:
+            # Check for the styled dropdown trigger "Choose one"
+            dropdown_trigger = await page.find("#header-simplerAuth-dropdownoptions-styledselect", timeout=5)
+            
+            if dropdown_trigger:
+                log("Found 'Unrecognized Device' dropdown. Handling...")
+                try: await dropdown_trigger.click()
+                except: await js_click(dropdown_trigger)
+                await page.sleep(1)
+                
+                # The options appear in a list container
+                # We need to traverse the options and find the best match (SMS)
+                list_container = await page.find("#ul-list-container-simplerAuth-dropdownoptions-styledselect")
+                if list_container:
+                    # Find all links that act as options
+                    # We look for the <a> tag with class "option" that is NOT a "groupLabelContainer"
+                    # The HTML structure: 
+                    # <li role="presentation"><a class="option js-option lastGroupItem STYLED_SELECT" ...><span class="primary groupingName">xxx-xxx-8088</span>...</a></li>
+                    
+                    options = await list_container.query_selector_all("a.option")
+                    target_option = None
+                    
+                    for opt in options:
+                        class_attr = await opt.get_attribute("class")
+                        if "groupLabelContainer" in class_attr:
+                            continue # Skip labels like "TEXT ME"
+                        
+                        text_content = await opt.text_content()
+                        
+                        # If we have a last_four match, prioritize it
+                        if last_four and last_four in text_content:
+                            target_option = opt
+                            break
+                        
+                        # Fallback: Capture the first valid option if we haven't found a match yet
+                        if not target_option:
+                            target_option = opt
+                    
+                    if target_option:
+                        log(f"Selecting verification option: {await target_option.text_content()}")
+                        try: await target_option.click()
+                        except: await js_click(target_option)
+                        await page.sleep(1)
+                        
+                        # Click Next to send the code
+                        request_code_btn = await page.find("#requestIdentificationCode")
+                        if request_code_btn:
+                            try: await request_code_btn.click()
+                            except: await js_click(request_code_btn)
+                            await page.sleep(2)
+        except Exception as e:
+             log(f"Error handling Unrecognized Device dropdown: {e}")
+
+    # 3. Standard 2FA Handling (Radio Buttons / Input)
+    if "dashboard" not in page.url:
+        log("Checking for Standard 2FA...")
         try:
             sms_opt = await page.find("#sms", timeout=3) or await find_shadow_element(page, "#sms")
             if sms_opt:
@@ -483,7 +539,6 @@ async def execute_trade_api(cookies, account_id, symbol, action, quantity, curre
         val_data = resp_val.json()
 
         # --- HARD STOP CHECK for RSA BLOCKS ---
-        # Checks for "Security is pending a corporate action" or "R02675A"
         error_msgs = val_data.get("tradeErrorMessages", [])
         for err in error_msgs:
             if "pending a corporate action" in err or "R02675A" in err:
