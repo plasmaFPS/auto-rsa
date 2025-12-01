@@ -1,13 +1,13 @@
-# Donald Ryan Gullett(MaxxRK)
-# Chase API
-
 import asyncio
+import datetime
+import json
 import os
-import pprint
 import traceback
-
-from chase import account as ch_account
-from chase import order, session, symbols
+import zendriver as uc
+from zendriver import cdp
+from zendriver.core import util
+from zendriver.core.element import Element
+from curl_cffi import requests
 from dotenv import load_dotenv
 
 from helperAPI import (
@@ -15,338 +15,506 @@ from helperAPI import (
     getOTPCodeDiscord,
     printAndDiscord,
     printHoldings,
-    stockOrder
+    stockOrder,
+    maskString
 )
 
+load_dotenv()
 
-def chase_run(
-    orderObj: stockOrder, command=None, botObj=None, loop=None, CHASE_EXTERNAL=None
-):
-    # Initialize .env file
-    load_dotenv()
-    # Import Chase account
-    if not os.getenv("CHASE") and CHASE_EXTERNAL is None:
-        print("Chase not found, skipping...")
-        return None
-    accounts = (
-        os.environ["CHASE"].strip().split(",")
-        if CHASE_EXTERNAL is None
-        else CHASE_EXTERNAL.strip().split(",")
-    )
-    # Get headless flag
-    headless = os.getenv("HEADLESS", "true").lower() == "true"
-    # Set the functions to be run
-    _, second_command = command
+# Controls detailed logging
+DEBUG = os.getenv("CHASE_DEBUG", "false").lower() == "true"
+COOKIES_PATH = "creds"
 
-    # For each set of login info, i.e. seperate chase accounts
-    for account in accounts:
-        # Start at index 1 and go to how many logins we have
-        index = accounts.index(account) + 1
-        # Receive the chase broker class object and the AllAccount object related to it
-        chase_details = chase_init(
-            account=account,
-            index=index,
-            headless=headless,
-            botObj=botObj,
-            loop=loop,
-        )
-        if chase_details is not None:
-            orderObj.set_logged_in(chase_details[0], "chase")
-            if second_command == "_holdings":
-                chase_holdings(chase_details[0], chase_details[1], loop=loop)
-            # Only other option is _transaction
-            else:
-                chase_transaction(
-                    chase_details[0], chase_details[1], orderObj, loop=loop
-                )
-    return None
+try:
+    chase_loop = asyncio.get_event_loop()
+except RuntimeError:
+    chase_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(chase_loop)
 
+# --- URL Constants ---
+LOGIN_URL = "https://secure05c.chase.com/web/auth/#/logon/logon/chaseOnline"
+LANDING_PAGE = "https://secure.chase.com/web/auth/dashboard#/dashboard/overview"
+TRADE_ENTRY_URL = "https://secure.chase.com/web/auth/dashboard#/dashboard/oi-trade/equity/entry"
 
-def get_account_id(account_connectors, value):
-    for key, val in account_connectors.items():
-        if val[0] == value:
-            return key
-    return None
+# API Endpoints
+API_ACCOUNT_LIST = "https://secure.chase.com/svc/rl/accounts/secure/v1/dashboard/module/list"
+API_POSITIONS = "https://secure.chase.com/svc/wr/dwm/secure/gateway/investments/servicing/inquiry-maintenance/digital-investment-positions/v2/positions"
 
+# Trading Endpoints
+API_QUOTE = "https://secure.chase.com/svc/wr/dwm/secure/gateway/investments/servicing/inquiry-maintenance/digital-equity-quote/v1/quotes"
+API_VALIDATE_BUY = "https://secure.chase.com/svc/wr/dwm/secure/gateway/investments/servicing/investor-servicing/digital-equity-trades/v1/buy-order-validations"
+API_EXECUTE_BUY = "https://secure.chase.com/svc/wr/dwm/secure/gateway/investments/servicing/investor-servicing/digital-equity-trades/v1/buy-orders"
+API_VALIDATE_SELL = "https://secure.chase.com/svc/wr/dwm/secure/gateway/investments/servicing/investor-servicing/digital-equity-trades/v1/sell-order-validations"
+API_EXECUTE_SELL = "https://secure.chase.com/svc/wr/dwm/secure/gateway/investments/servicing/investor-servicing/digital-equity-trades/v1/sell-orders"
 
-def chase_init(account: str, index: int, headless=True, botObj=None, loop=None):
-    """
-    Logs into chase. Checks for 2FA and gathers details on the chase accounts
+def log(message):
+    if DEBUG:
+        print(f"[CHASE DEBUG] {message}")
 
-    Args:
-        account (str): The chase username, password, last 4 of phone #, and possible debug flag, seperated by ':'.
-        index (int): The index of this chase account in a list of accounts.
-        headless (bool): Whether to run the browser in headless mode.
-        botObj (Bot): The discord bot object if used.
-        loop (AbstractEventLoop): The event loop to be used
-    Raises:
-        Exception: Error logging in to Chase
-    Returns:
-        Brokerage object which represents the chase session and data.
-        AllAccounts object which holds account information.
-    """
-    # Log in to Chase account
-    print("Logging in to Chase...")
-    # Create brokerage class object and call it chase
-    chase_obj = Brokerage("Chase")
-    name = f"Chase {index}"
-    try:
-        # Split the login into into seperate items
-        account = account.split(":")
-        # If the debug flag is present, use it, else set it to false
-        debug = bool(account[3]) if len(account) == 4 else False
-        # Create a ChaseSession class object which automatically configures and opens a browser
-        ch_session = session.ChaseSession(
-            title=f"chase_{index}",
-            headless=headless,
-            profile_path="./creds",
-            debug=debug,
-        )
-        # Login to chase
-        need_second = ch_session.login(account[0], account[1], account[2])
-        # If 2FA is present, ask for code
-        if need_second:
-            if botObj is None and loop is None:
-                ch_session.login_two(input("Enter code: "))
-            else:
-                sms_code = asyncio.run_coroutine_threadsafe(
-                    getOTPCodeDiscord(botObj, name, code_len=8, loop=loop), loop
-                ).result()
-                if sms_code is None:
-                    raise Exception(f"Chase {index} code not received in time...", loop)
-                ch_session.login_two(sms_code)
-        # Create an AllAccounts class object using the current browser session. Holds information about all accounts
-        all_accounts = ch_account.AllAccount(ch_session)
-        # Get the account IDs and store in a list. The IDs are different than account numbers.
-        account_ids = list(all_accounts.account_connectors.keys())
-        print("Logged in to Chase!")
-        # In the Chase Brokerage object, set the index of "Chase 1" to be its own empty array and append the chase session to the end of this array
-        chase_obj.set_logged_in_object(name, ch_session)
-        # Create empty array to store account number masks (last 4 digits of each account number)
-        print_accounts = []
-        for acct in account_ids:
-            # Create an AccountDetails Object which organizes the information in the AllAccounts class object
-            account = ch_account.AccountDetails(acct, all_accounts)
-            # Save account masks
-            chase_obj.set_account_number(name, account.mask)
-            chase_obj.set_account_totals(name, account.mask, account.account_value)
-            print_accounts.append(account.mask)
-        print(f"The following Chase accounts were found: {print_accounts}")
-    except Exception as e:
-        ch_session.close_browser()
-        print(f"Error logging in to Chase: {e}")
-        print(traceback.format_exc())
-        return None
-    return [chase_obj, all_accounts]
+def create_creds_folder():
+    if not os.path.exists(COOKIES_PATH):
+        os.makedirs(COOKIES_PATH)
 
-
-def chase_holdings(chase_o: Brokerage, all_accounts: ch_account.AllAccount, loop=None):
-    """
-    Get the holdings of chase account
-
-    Args:
-        chase_o (Brokerage): Brokerage object associated with the current session.
-        all_accounts (AllAccount): AllAccount object that holds account information.
-        loop (AbstractEventLoop): The event loop to be used if present.
-    """
-    # Get holdings on each account. This loop only ever runs once.
-    for key in chase_o.get_account_numbers():
+async def chase_error(error: str, page=None, discord_loop=None, browser=None):
+    print(f"Chase Error: {error}")
+    if page:
         try:
-            # Retrieve account masks and iterate through them
-            for _, account in enumerate(chase_o.get_account_numbers(key)):
-                # Retrieve the chase session
-                ch_session: session.ChaseSession = chase_o.get_logged_in_objects(key)
-                # Get the account ID accociated with mask
-                account_id = get_account_id(all_accounts.account_connectors, account)
-                data = symbols.SymbolHoldings(account_id, ch_session)
-                success = data.get_holdings()
-                if success:
-                    for i, _ in enumerate(data.positions):
-                        if (
-                            data.positions[i]["instrumentLongName"]
-                            == "Cash and Sweep Funds"
-                        ):
-                            sym = data.positions[i]["instrumentLongName"]
-                            current_price = data.positions[i]["marketValue"][
-                                "baseValueAmount"
-                            ]
-                            qty = "1"
-                            chase_o.set_holdings(key, account, sym, qty, current_price)
-                        elif data.positions[i]["assetCategoryName"] == "EQUITY":
-                            try:
-                                sym = data.positions[i]["positionComponents"][0][
-                                    "securityIdDetail"
-                                ][0]["symbolSecurityIdentifier"]
-                                current_price = data.positions[i]["marketValue"][
-                                    "baseValueAmount"
-                                ]
-                                qty = data.positions[i]["tradedUnitQuantity"]
-                            except KeyError:
-                                sym = data.positions[i]["securityIdDetail"][
-                                    "cusipIdentifier"
-                                ]
-                                current_price = data.positions[i]["marketValue"][
-                                    "baseValueAmount"
-                                ]
-                                qty = data.positions[i]["tradedUnitQuantity"]
-                            chase_o.set_holdings(key, account, sym, qty, current_price)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            screenshot_name = f"chase_error_{timestamp}.png"
+            await page.save_screenshot(filename=screenshot_name)
+            
+            html_name = f"chase_error_{timestamp}.html"
+            content = await page.get_content()
+            with open(html_name, "w", encoding="utf-8") as f:
+                f.write(content)
+                
+            log(f"Debug artifacts saved: {screenshot_name}, {html_name}")
         except Exception as e:
-            ch_session.close_browser()
-            printAndDiscord(f"{key} {account}: Error getting holdings: {e}", loop)
-            print(traceback.format_exc())
-            continue
-        printHoldings(chase_o, loop)
-    ch_session.close_browser()
+            print(f"Failed to save debug artifacts: {e}")
 
+    if discord_loop:
+        printAndDiscord(f"Chase Error: {error}", discord_loop)
 
-def chase_transaction(
-    chase_obj: Brokerage,
-    all_accounts: ch_account.AllAccount,
-    orderObj: stockOrder,
-    loop=None,
-):
-    """
-    Executes transactions on all accounts.
+# ==========================================
+# DOM Helpers
+# ==========================================
 
-    Args:
-        chase_obj (Brokerage): The brokerage class object related to the chase session.
-        all_accounts (AllAccount): AllAccount object that holds account information.
-        orderObj (stockOrder): The order(s) to be executed.
-        loop (AbstractEventLoop): The event loop to be used if present.
-    Returns:
-        None
-    """
-    print()
-    print("==============================")
-    print("Chase")
-    print("==============================")
-    print()
-
-    # Buy on each account
-    for ticker in orderObj.get_stocks():
-
-        # This loop should only run once, but it provides easy access to the chase session by using key to get it back from
-        # the chase_obj via get_logged_in_objects
-        for key in chase_obj.get_account_numbers():
-
-            # Declare for later
-            price_type = order.PriceType.MARKET
-            limit_price = 0.0
-
-            # Load the chase session
-            ch_session: session.ChaseSession = chase_obj.get_logged_in_objects(key)
-
-            # Determine limit or market for buy orders
-            if orderObj.get_action().capitalize() == "Buy":
-                account_ids = list(all_accounts.account_connectors.keys())
-
-                # Get the ask price and determine whether to use MARKET or LIMIT order
-                symbol_quote = symbols.SymbolQuote(
-                    account_id=account_ids[0], session=ch_session, symbol=ticker
-                )
-
-                # If it should be limit
-                if symbol_quote.ask_price < 1:
-                    price_type = order.PriceType.LIMIT
-                    if symbol_quote.ask_price > 0.10:
-                        # Set limit price
-                        limit_price = round(symbol_quote.ask_price + 0.01, 2)
-                    else:
-                        # Set limit price always round up
-                        factor = 10**2
-                        value = symbol_quote.ask_price * factor
-                        if value % 1 != 0:
-                            value = int(value) + 1
-                        limit_price = value / factor
-
-            printAndDiscord(
-                f"{key} {orderObj.get_action()}ing {orderObj.get_amount()} {ticker} @ {price_type.value}",
-                loop,
-            )
+async def find_shadow_element(page, selector):
+    """Traverses Shadow DOM using zendriver native utils."""
+    try:
+        doc = await page.send(cdp.dom.get_document(-1, True))
+        shadow_hosts = util.filter_recurse_all(
+            doc, lambda n: hasattr(n, "shadow_roots") and bool(n.shadow_roots)
+        )
+        for host_node in shadow_hosts:
+            if not host_node.shadow_roots: continue
+            shadow_root_node = host_node.shadow_roots[0]
+            shadow_element = Element(shadow_root_node, page, shadow_root_node)
             try:
-                print(chase_obj.get_account_numbers())
-                # For each account number "mask" attached to "Chase_#" complete the order
-                for account in chase_obj.get_account_numbers(key):
-                    target_account_id = get_account_id(
-                        all_accounts.account_connectors, account
-                    )
-                    # If DRY is True, don't actually make the transaction
-                    if orderObj.get_dry():
-                        printAndDiscord(
-                            "Running in DRY mode. No transactions will be made.", loop
-                        )
+                target = await shadow_element.query_selector(selector)
+                if target: return target
+            except Exception: continue
+    except Exception:
+        pass
+    return None
 
-                    if orderObj.get_action().capitalize() == "Buy":
-                        order_type = order.OrderSide.BUY
-                    else:
-                        # Reset to market for selling
-                        price_type = order.PriceType.MARKET
-                        order_type = order.OrderSide.SELL
-                    chase_order = order.Order(ch_session)
-                    messages = chase_order.place_order(
-                        account_id=target_account_id,
-                        quantity=int(orderObj.get_amount()),
-                        price_type=price_type,
-                        symbol=ticker,
-                        duration=order.Duration.DAY,
-                        order_type=order_type,
-                        dry_run=orderObj.get_dry(),
-                        limit_price=limit_price,
-                    )
-                    print("The order verification produced the following messages: ")
-                    if orderObj.get_dry():
-                        pprint.pprint(messages["ORDER PREVIEW"])
-                        printAndDiscord(
-                            (
-                                f"{key} account {account}: The order verification was "
-                                + (
-                                    "successful"
-                                    if messages["ORDER PREVIEW"]
-                                    not in ["", "No order preview page found."]
-                                    else "unsuccessful"
-                                )
-                            ),
-                            loop,
-                        )
-                        if (
-                            messages["ORDER INVALID"]
-                            != "No invalid order message found."
-                        ):
-                            printAndDiscord(
-                                f"{key} account {account}: The order verification produced the following messages: {messages['ORDER INVALID']}",
-                                loop,
-                            )
-                    else:
-                        pprint.pprint(messages["ORDER CONFIRMATION"])
-                        printAndDiscord(
-                            (
-                                f"{key} account {account}: The order verification was "
-                                + (
-                                    "successful"
-                                    if messages["ORDER CONFIRMATION"]
-                                    not in [
-                                        "",
-                                        "No order confirmation page found. Order Failed.",
-                                    ]
-                                    else "unsuccessful"
-                                )
-                            ),
-                            loop,
-                        )
-                        if (
-                            messages["ORDER INVALID"]
-                            != "No invalid order message found."
-                        ):
-                            printAndDiscord(
-                                f"{key} account {account}: The order verification produced the following messages: {messages['ORDER INVALID']}",
-                                loop,
-                            )
+async def js_click(element):
+    try:
+        await element.apply("e => e.click()")
+        return True
+    except Exception:
+        return False
+
+# ==========================================
+# Main Logic
+# ==========================================
+
+def chase_run(orderObj=None, command=None, botObj=None, loop=None, CHASE_EXTERNAL=None, DOCKER=False, **kwargs):
+    print("Starting Chase run process...")
+    load_dotenv()
+    create_creds_folder()
+    discord_loop = loop
+
+    if not os.getenv("CHASE") and CHASE_EXTERNAL is None:
+        print("CHASE environment variable not found.")
+        return None
+
+    accounts_env = (os.environ.get("CHASE", "") if CHASE_EXTERNAL is None else CHASE_EXTERNAL).strip().split(",")
+    chase_brokerage_obj = Brokerage("CHASE")
+    
+    if command is None:
+        action_to_perform = "_holdings"
+    else:
+        _, action_to_perform = command
+
+    try:
+        populated_obj = chase_loop.run_until_complete(
+            _async_chase_run_wrapper(
+                accounts_env, chase_brokerage_obj, action_to_perform, botObj, discord_loop, orderObj, DOCKER
+            )
+        )
+        if populated_obj and orderObj:
+            orderObj.set_logged_in(populated_obj, 'chase')
+        return populated_obj
+
+    except Exception as e:
+        print(f"Critical error in Chase run: {e}")
+        traceback.print_exc()
+        return chase_brokerage_obj
+
+async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, action, botObj, discord_loop, orderObj, DOCKER=False):
+    headless = os.getenv("HEADLESS", "true").lower() == "true"
+    
+    for acc_idx, account_cred_str in enumerate(accounts_env):
+        account_name_key = f"Chase {acc_idx + 1}"
+        browser = None
+        page = None
+        
+        try:
+            browser_args = []
+            if DOCKER:
+                browser_args.extend(["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
+            elif headless:
+                browser_args.extend(["--headless=new", "--window-size=1920,1080"])
+            else:
+                browser_args.extend([  
+                    "--start-maximized",  
+                    "--disable-session-crashed-bubble",  
+                    "--disable-infobars",  
+                    "--disable-features=TranslateUI,VizDisplayCompositor",
+                    "--no-first-run",  
+                    "--disable-default-apps",
+                    "--disable-extensions",
+                ])
+
+            profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenChase_{acc_idx + 1}"))
+            
+            log(f"Starting browser for {account_name_key}...")
+            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
+            page = await browser.get(LOGIN_URL) if not browser.tabs else await browser.tabs[0].get(LOGIN_URL)
+
+            # 1. Perform Browser Login (UI Interaction)
+            creds = account_cred_str.split(":")
+            success = await chase_login_ui(page, creds[0], creds[1], creds[2] if len(creds)>2 else "0000", account_name_key, botObj, discord_loop)
+            if not success: raise Exception("Login failed.")
+
+            brokerage_obj.set_logged_in_object(account_name_key, browser)
+
+            # 2. Get Cookies & API Setup
+            cookies = await browser.cookies.get_all()
+            cookies_dict = {c.name: c.value for c in cookies}
+            
+            # API Step A: Get Accounts Map
+            await fetch_accounts_api(cookies_dict, brokerage_obj, account_name_key, discord_loop)
+
+            # API Step B: Action
+            if action == "_holdings":
+                await fetch_holdings_api(cookies_dict, brokerage_obj, account_name_key, discord_loop)
+            elif action == "_transaction":
+                log(f"Navigating to Trade UI for {account_name_key} to prime cookies...")
+                await navigate_to_trade_context(page)
+                
+                # Refresh cookies after navigation
+                cookies = await browser.cookies.get_all()
+                cookies_dict = {c.name: c.value for c in cookies}
+                
+                await chase_transaction(cookies_dict, brokerage_obj, orderObj, account_name_key, discord_loop)
+
+        except Exception as e:
+            await chase_error(f"Error in {account_name_key}: {e}", page, discord_loop, browser)
+        finally:  
+            if browser:  
+                try:  
+                    await asyncio.sleep(2)
+                    for tab in browser.tabs:  
+                        try: await tab.close()  
+                        except: pass  
+                    await asyncio.sleep(1)
+                    await browser.stop()  
+                except Exception as e:  
+                    log(f"Browser stop error: {e}")  
+                try:  
+                    if browser._process: browser._process.kill()  
+                except: pass
+
+    return brokerage_obj
+
+# ==========================================
+# Navigation & Login Logic
+# ==========================================
+
+async def chase_login_ui(page, username, password, last_four, name, botObj, discord_loop):
+    log(f"Logging in via UI for {name}...")
+    await page.sleep(3)
+
+    if "dashboard" in page.url:
+        log("Already logged in.")
+        return True
+
+    try:
+        user_box = await page.find("#userId-input-field-input", timeout=10) or await find_shadow_element(page, "#userId-input-field-input")
+        pass_box = await page.find("#password-input-field-input", timeout=10) or await find_shadow_element(page, "#password-input-field-input")
+        
+        if user_box and pass_box:
+            await user_box.clear_input_by_deleting()
+            await user_box.send_keys(username)
+            await pass_box.send_keys(password)
+            btn = await page.find("#signin-button", timeout=5) or await find_shadow_element(page, "#signin-button")
+            await btn.click()
+            await page.sleep(5)
+    except Exception:
+        pass
+
+    # 2FA Handling
+    if "dashboard" not in page.url:
+        log("Checking for 2FA...")
+        try:
+            sms_opt = await page.find("#sms", timeout=3) or await find_shadow_element(page, "#sms")
+            if sms_opt:
+                try: await sms_opt.click()
+                except: await js_click(sms_opt)
+                await page.sleep(1)
+                
+                next_btn = await page.find("#next-content", timeout=3) or await find_shadow_element(page, "#next-content")
+                if next_btn:
+                    try: await next_btn.click()
+                    except: await js_click(next_btn)
+
+            otp_input = await page.find("#otpInput", timeout=10) or await find_shadow_element(page, "#otpInput")
+            if otp_input:
+                if botObj is None:
+                    print(f"\n[ACTION REQUIRED] Enter Chase 2FA Code for {name}: ")
+                    code = await asyncio.get_event_loop().run_in_executor(None, input)
+                else:
+                    code = await getOTPCodeDiscord(botObj, name, timeout=300, loop=discord_loop)
+                
+                if code:
+                    await otp_input.send_keys(str(code))
+                    next_btn = await page.find("#next-content", timeout=5) or await find_shadow_element(page, "#next-content")
+                    if next_btn:
+                        try: await next_btn.click()
+                        except: await js_click(next_btn)
+                    await page.sleep(5)
+        except Exception as e:
+            log(f"2FA Logic Error: {e}")
+
+    if "dashboard" in page.url: return True
+    if "esasiOptout" in page.url: return True
+    return "dashboard" in page.url
+
+async def navigate_to_trade_context(page):
+    """Navigates to the trade entry page to prime session cookies."""
+    try:
+        log(f"Navigating to {TRADE_ENTRY_URL}")
+        await page.get(TRADE_ENTRY_URL)
+        await page.sleep(8) 
+        
+        if "entry" not in page.url and "dashboard" not in page.url:
+            log("Warning: Might not be on trade page. Transactions might fail.")
+    except Exception as e:
+        log(f"Navigation error: {e}")
+
+# ==========================================
+# API Logic
+# ==========================================
+
+def get_base_headers():
+    return {
+        'accept': 'application/json, text/plain, */*',
+        'content-type': 'application/json',
+        'referer': 'https://secure.chase.com/web/auth/dashboard',
+        'x-jpmc-csrf-token': 'NONE',
+        'x-jpmc-channel': 'id=C30',
+        'origin': 'https://secure.chase.com',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+    }
+
+async def fetch_accounts_api(cookies, brokerage_obj: Brokerage, login_key, discord_loop):
+    headers = get_base_headers()
+    headers['content-type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
+    data = 'context=WEB_CPO_OVERVIEW_DASHBOARD&selectorIdType=ACCOUNT_GROUP'
+
+    try:
+        response = requests.post(API_ACCOUNT_LIST, headers=headers, cookies=cookies, data=data, impersonate="chrome")
+        if response.status_code != 200: return
+
+        resp_json = response.json()
+        cache = resp_json.get("cache", [])
+        for item in cache:
+            if "investmentAccountOverviews" in item.get("response", {}):
+                details = item["response"]["investmentAccountOverviews"][0].get("investmentAccountDetails", [])
+                for acct in details:
+                    acc_id = str(acct.get("accountId"))
+                    mask = acct.get("mask", "")
+                    val = float(acct.get("accountValue", 0))
+                    
+                    if not hasattr(brokerage_obj, "_chase_id_map"): brokerage_obj._chase_id_map = {}
+                    brokerage_obj._chase_id_map[mask] = acc_id
+                    brokerage_obj.set_account_number(login_key, mask) 
+                    brokerage_obj.set_account_totals(login_key, mask, val)
+    except Exception as e:
+        printAndDiscord(f"Chase API Error (Accounts): {e}", discord_loop)
+
+async def fetch_holdings_api(cookies, brokerage_obj: Brokerage, login_key, discord_loop):
+    if not hasattr(brokerage_obj, "_chase_id_map"): return
+    headers = get_base_headers()
+
+    for display_name, acc_id in brokerage_obj._chase_id_map.items():
+        payload = {
+            "selectorIdentifier": acc_id,
+            "selectorCode": "ACCOUNT",
+            "taxLotIndicator": False, "currencyCode": "", "voluntaryCorporateActionIndicator": False,
+            "intradayUpdateIndicator": True, "pinnedPositionIndicator": True
+        }
+        try:
+            response = requests.post(API_POSITIONS, headers=headers, cookies=cookies, json=payload, impersonate="chrome")
+            if response.status_code != 200: continue
+            
+            data = response.json()
+            for pos in data.get("positions", []):
+                symbol = "UNKNOWN"
+                if "Cash" in pos.get("instrumentLongName", ""): symbol = "CASH"
+                else:
+                    comps = pos.get("positionComponents", [])
+                    if comps: symbol = comps[0].get("securityIdDetail", [{}])[0].get("symbolSecurityIdentifier", "UNKNOWN")
+                
+                qty = float(pos.get("tradedUnitQuantity", 0))
+                price = float(pos.get("marketPrice", {}).get("baseValueAmount", 0))
+                if symbol and qty > 0:
+                    brokerage_obj.set_holdings(login_key, display_name, symbol, qty, price)
+        except Exception: pass
+
+    printHoldings(brokerage_obj, discord_loop)
+
+# ==========================================
+# Transaction Logic
+# ==========================================
+
+async def get_stock_quote(cookies, symbol):
+    headers = get_base_headers()
+    url = f"{API_QUOTE}?security-symbol-code={symbol}&security-validate-indicator=true&dollar-based-trading-include-indicator=true"
+    
+    try:
+        response = requests.get(url, headers=headers, cookies=cookies, impersonate="chrome")
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        log(f"Quote error: {e}")
+    return None
+
+async def chase_transaction(cookies, brokerage_obj: Brokerage, orderObj: stockOrder, login_key, discord_loop):
+    if not hasattr(brokerage_obj, "_chase_id_map"):
+        log("No account mapping found for transaction.")
+        return
+
+    for mask, internal_id in brokerage_obj._chase_id_map.items():
+        for symbol in orderObj.get_stocks():
+            action = orderObj.get_action().upper()
+            quantity = orderObj.get_amount()
+            dry_run = orderObj.get_dry()
+            
+            log(f"Processing {action} {quantity} {symbol} for account {mask} ({internal_id})")
+
+            try:
+                # 1. Get Quote
+                quote_data = await get_stock_quote(cookies, symbol)
+                if not quote_data:
+                    printAndDiscord(f"Skipping {symbol} in Chase {mask}: Could not fetch quote.", discord_loop)
+                    continue
+                
+                current_price = float(quote_data.get("lastTradePriceAmount", 0))
+                if current_price == 0:
+                     if action == "BUY": current_price = float(quote_data.get("askPriceAmount", 0))
+                     else: current_price = float(quote_data.get("bidPriceAmount", 0))
+
+                log(f"Quote for {symbol}: {current_price}")
+
+                if dry_run:
+                    printAndDiscord(f"[DRY RUN] Would {action} {quantity} of {symbol} in Chase {mask} @ ~${current_price}", discord_loop)
+                    continue
+
+                # 2. Execute
+                result = await execute_trade_api(cookies, internal_id, symbol, action, quantity, current_price, discord_loop)
+                
+                if result:
+                    printAndDiscord(f"Successfully executed {action} for {quantity} {symbol} in Chase {mask}", discord_loop)
+                else:
+                    printAndDiscord(f"Failed to execute {action} for {symbol} in Chase {mask}", discord_loop)
+
             except Exception as e:
-                printAndDiscord(f"{key} {account}: Error submitting order: {e}", loop)
-                print(traceback.format_exc())
-                continue
-    ch_session.close_browser()
-    printAndDiscord(
-        "All Chase transactions complete",
-        loop,
-    )
+                printAndDiscord(f"Error trading {symbol} in Chase {mask}: {e}", discord_loop)
+                traceback.print_exc()
+
+async def execute_trade_api(cookies, account_id, symbol, action, quantity, current_price, discord_loop):
+    headers = get_base_headers()
+    
+    if action == "BUY":
+        url_validate = API_VALIDATE_BUY
+        url_execute = API_EXECUTE_BUY
+    elif action == "SELL":
+        url_validate = API_VALIDATE_SELL
+        url_execute = API_EXECUTE_SELL
+    else:
+        return False
+
+    # --- AGGRESSIVE PRICING LOGIC ---
+    if current_price > 1.00:
+        order_type = "MARKET"
+        limit_price = None
+        log(f"Price ${current_price} > $1.00. Using MARKET order.")
+    else:
+        order_type = "LIMIT"
+        if action == "BUY":
+            limit_price = round(current_price + 0.01, 2)
+        else:
+            limit_price = round(current_price - 0.01, 2)
+            if limit_price < 0.01: limit_price = 0.01
+        log(f"Price ${current_price} < $1.00. Using LIMIT order @ ${limit_price} (Aggressive).")
+
+    payload_validate = {
+        "accountIdentifier": int(account_id),
+        "marketPriceAmount": current_price, 
+        "orderQuantity": quantity,
+        "accountTypeCode": "CASH",
+        "timeInForceCode": "DAY",
+        "securitySymbolCode": symbol,
+        "tradeChannelName": "DESKTOP",
+        "dollarBasedTradingEligibleIndicator": False,
+        "orderTypeCode": order_type
+    }
+
+    if order_type == "LIMIT":
+        payload_validate["limitPriceAmount"] = limit_price
+
+    if action == "SELL":
+        payload_validate["tradeActionName"] = "SELL"
+
+    log(f"Validating order: {json.dumps(payload_validate)}")
+    
+    try:
+        # STEP 1: VALIDATION
+        resp_val = requests.post(url_validate, headers=headers, cookies=cookies, json=payload_validate, impersonate="chrome")
+        
+        if resp_val.status_code != 200:
+            log(f"Validation Failed ({resp_val.status_code}): {resp_val.text}")
+            printAndDiscord(f"Chase Trade Validation Failed: {resp_val.text[:200]}", discord_loop)
+            return False
+            
+        val_data = resp_val.json()
+
+        # --- HARD STOP CHECK for RSA BLOCKS ---
+        # Checks for "Security is pending a corporate action" or "R02675A"
+        error_msgs = val_data.get("tradeErrorMessages", [])
+        for err in error_msgs:
+            if "pending a corporate action" in err or "R02675A" in err:
+                log(f"HARD STOP triggered by error: {err}")
+                printAndDiscord(f"BLOCKED: {symbol} is pending corporate action/RSA. Trade aborted in Chase {account_id}.", discord_loop)
+                return False
+
+        exchange_id = val_data.get("financialInformationExchangeSystemOrderIdentifier")
+        
+        if not exchange_id:
+            log(f"Validation passed but no Exchange ID returned: {val_data}")
+            return False
+            
+        log(f"Validation successful. Exchange ID: {exchange_id}")
+
+        # STEP 2: EXECUTION
+        payload_execute = payload_validate.copy()
+        payload_execute["financialInformationExchangeSystemOrderIdentifier"] = exchange_id
+        
+        resp_exec = requests.post(url_execute, headers=headers, cookies=cookies, json=payload_execute, impersonate="chrome")
+        
+        if resp_exec.status_code != 200:
+            log(f"Execution Failed ({resp_exec.status_code}): {resp_exec.text}")
+            printAndDiscord(f"Chase Trade Execution Failed: {resp_exec.text[:200]}", discord_loop)
+            return False
+            
+        exec_data = resp_exec.json()
+        order_id = exec_data.get("orderIdentifier")
+        log(f"Order Executed. ID: {order_id}")
+        return True
+
+    except Exception as e:
+        log(f"API Exception during trade: {e}")
+        return False

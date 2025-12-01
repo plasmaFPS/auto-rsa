@@ -63,7 +63,7 @@ def get_trading_session():
             return "CORE_HOURS"
         else:
             # It's a weekday, but outside core hours (pre-market or after-hours)
-            log_debug("Market is in extended session: ALL_HOURS.")
+            log_debug("Market is in appended session: ALL_HOURS.")
             return "ALL_HOURS"
     except Exception as e:
         print(f"Error determining trading session: {e}. Defaulting to CORE_HOURS.")
@@ -93,24 +93,6 @@ def build_headers(csrf_token=None):
         headers['referer'] = 'https://www.sofi.com/'
     return headers
 
-
-async def save_cookies_to_pkl(browser, cookie_filename):
-    try:
-        await browser.cookies.save(cookie_filename)
-    except Exception as e:
-        log_debug(f"Failed to save cookies: {e}")
-
-
-async def load_cookies_from_pkl(browser, page, cookie_filename):
-    try:
-        await browser.cookies.load(cookie_filename)
-        await page.reload()
-        return True
-    except ValueError as e:
-        log_debug(f"Failed to load cookies: {e}")
-    except FileNotFoundError:
-        log_debug("Cookie file does not exist.")
-    return False
 
 
 async def sofi_error(error: str, page=None, discord_loop=None):
@@ -184,20 +166,31 @@ def sofi_run(
                 # Docker-specific args for zendriver/Chrome
                 # We DO NOT use --headless here, as we are running in Xvfb (DISPLAY=:99)
                 # This is much stealthier than --headless=new
-                browser_args.append("--no-sandbox")
-                browser_args.append("--disable-dev-shm-usage")
-                browser_args.append("--disable-gpu")
-                browser_args.append("--window-size=1920,1080")
+                browser_args.extend(["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
             elif headless:
                 # Standard headless for local runs
-                browser_args.append("--headless=new")
-                browser_args.append("--window-size=1920,1080")
+                browser_args.extend(["--headless=new", "--window-size=1920,1080"])
+            else:
+                browser_args.extend([  
+                    "--start-maximized",  
+                    "--disable-session-crashed-bubble",  
+                    "--disable-infobars",  
+                    "--disable-features=TranslateUI,VizDisplayCompositor",
+                    "--no-first-run",  
+                    "--disable-default-apps",
+                    "--disable-extensions",
+                ])
             
             # Common args
             browser_args.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
 
+            # Create a unique profile path for each account
+            profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenSoFi_{index}"))
+            if not os.path.exists(profile_path):
+                os.makedirs(profile_path)
+
             print(f"Starting browser for account {name}...")
-            browser = sofi_loop.run_until_complete(uc.start(browser_args=browser_args))
+            browser = sofi_loop.run_until_complete(uc.start(browser_args=browser_args, user_data_dir=profile_path))
             print(f"Browser started for {name}. Beginning login sequence...")
 
             sofi_init(
@@ -227,17 +220,28 @@ def sofi_run(
     finally:
         if browser:
             try:
-                print("Saving cookies and stopping browser...")
-                sofi_loop.run_until_complete(save_cookies_to_pkl(browser, cookie_filename))
-                sofi_loop.run_until_complete(browser.stop())
-                print("Browser stopped and cookies saved.")
+                print("Closing browser sessions...")
+                
+                # Define helper to clean tabs asynchronously within the synchronous run function
+                async def safe_browser_close():
+                    await asyncio.sleep(2)
+                    if browser.tabs:
+                        for tab in browser.tabs:
+                            try: await tab.close()
+                            except: pass
+                    await asyncio.sleep(1)
+                    await browser.stop()
+
+                sofi_loop.run_until_complete(safe_browser_close())
+                print("Browser stopped.")
             except Exception as e:
-                print(f"Error closing the browser: {e}")
-                sofi_loop.run_until_complete(
-                    sofi_error(
-                        f"Error closing the browser: {e}", discord_loop=discord_loop
-                    )
-                )
+                log_debug(f"Browser stop error: {e}")
+            
+            # Failsafe: Force kill the process if it still exists
+            try:
+                if hasattr(browser, '_process') and browser._process:
+                    browser._process.kill()
+            except: pass
     return sofi_obj
 
 
@@ -266,23 +270,26 @@ def sofi_init(
 
             attempts += 1
 
-        log_debug("Loading cookies...")
-        cookies_loaded = sofi_loop.run_until_complete(
-            load_cookies_from_pkl(browser, page, cookie_filename)
-        )
-        if cookies_loaded:
-            log_debug("Cookies loaded successfully.")
-            log_debug("Navigating to SoFi account overview page...")
-            sofi_loop.run_until_complete(page.get("https://www.sofi.com/wealth/app/"))
-            sofi_loop.run_until_complete(browser.sleep(5))
-            current_url = sofi_loop.run_until_complete(get_current_url(page, discord_loop))
+            attempts += 1
+        
+        # Cookies are now handled by the persistent user profile
+        # log_debug("Loading cookies...")
+        # cookies_loaded = sofi_loop.run_until_complete(
+        #     load_cookies_from_pkl(browser, page, cookie_filename)
+        # )
+        
+        # Check if we are already logged in (cookies persisted)
+        log_debug("Navigating to SoFi account overview page...")
+        sofi_loop.run_until_complete(page.get("https://www.sofi.com/wealth/app/"))
+        sofi_loop.run_until_complete(browser.sleep(5))
+        current_url = sofi_loop.run_until_complete(get_current_url(page, discord_loop))
 
-            if current_url and "overview" in current_url:
-                log_debug("Overview page loaded successfully.")
-                sofi_loop.run_until_complete(save_cookies_to_pkl(browser, cookie_filename))
-                return sofi_obj
-            else:
-                log_debug("Failed to reach overview page; initiating login process.")
+        if current_url and "overview" in current_url:
+            log_debug("Overview page loaded successfully.")
+            # sofi_loop.run_until_complete(save_cookies_to_pkl(browser, cookie_filename))
+            return sofi_obj
+        else:
+            log_debug("Failed to reach overview page; initiating login process.")
 
         log_debug("Logging in manually...")
         sofi_loop.run_until_complete(
@@ -806,16 +813,16 @@ async def fetch_stock_price(symbol, discord_loop=None):
             price = None
 
             # <-- START NEW LOGIC
-            # If in extended hours, prioritize the extendedHoursPrice field
+            # If in appended hours, prioritize the appendedHoursPrice field
             if session_type == "ALL_HOURS":
-                price = data.get("extendedHoursPrice")
+                price = data.get("appendedHoursPrice")
                 if price is not None:
-                    log_debug(f"Fetched extended hours price for {symbol}: {price}")
+                    log_debug(f"Fetched appended hours price for {symbol}: {price}")
                     return float(price)
                 else:
-                    log_debug(f"Warning: In ALL_HOURS session, but 'extendedHoursPrice' was null for {symbol}.")
+                    log_debug(f"Warning: In ALL_HOURS session, but 'appendedHoursPrice' was null for {symbol}.")
             
-            # Fallback for CORE_HOURS or if extendedHoursPrice was null
+            # Fallback for CORE_HOURS or if appendedHoursPrice was null
             price = data.get("last")
             if price is not None:
                 log_debug(f"Fetched last price for {symbol}: {price}")
@@ -829,7 +836,7 @@ async def fetch_stock_price(symbol, discord_loop=None):
             # <-- END NEW LOGIC
 
             # If all price fields are null
-            log_debug(f"Error: All price fields (extendedHoursPrice, last, price) were null for {symbol}.")
+            log_debug(f"Error: All price fields (appendedHoursPrice, last, price) were null for {symbol}.")
             return None
             
         log_debug(

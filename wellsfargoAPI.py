@@ -42,23 +42,6 @@ def create_creds_folder():
         os.makedirs(COOKIES_PATH)
         log("'creds' folder created.")
 
-async def save_cookies_to_pkl(browser, cookie_filename):
-    try:
-        await browser.cookies.save(cookie_filename)
-    except Exception as e:
-        print(f"Failed to save cookies: {e}")
-
-
-async def load_cookies_from_pkl(browser, page, cookie_filename):
-    try:
-        await browser.cookies.load(cookie_filename)
-        await page.reload()
-        return True
-    except ValueError as e:
-        print(f"Failed to load cookies: {e}")
-    except FileNotFoundError:
-        print("Cookie file does not exist.")
-    return False
 
 
 async def wellsfargo_error(error: str, page=None, discord_loop=None, browser=None):
@@ -321,16 +304,27 @@ async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_popula
         try:
             browser_args = []
             if DOCKER:
-                browser_args.append("--no-sandbox")
-                browser_args.append("--disable-dev-shm-usage")
-                browser_args.append("--disable-gpu")
-                browser_args.append("--window-size=1920,1080")
+                browser_args.extend(["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
             elif headless:
-                browser_args.append("--headless=new")
-                browser_args.append("--window-size=1920,1080")
+                browser_args.extend(["--headless=new", "--window-size=1920,1080"])
+            else:
+                browser_args.extend([  
+                    "--start-maximized",  
+                    "--disable-session-crashed-bubble",  
+                    "--disable-infobars",  
+                    "--disable-features=TranslateUI,VizDisplayCompositor",
+                    "--no-first-run",  
+                    "--disable-default-apps",
+                    "--disable-extensions",
+                ])
+
+            # Create a unique profile path for each account
+            profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenWellsFargo_{acc_idx + 1}"))
+            if not os.path.exists(profile_path):
+                os.makedirs(profile_path)
 
             log("Starting browser...")
-            browser = await uc.start(browser_args=browser_args)
+            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
             
             if not browser.tabs:
                 page = await browser() 
@@ -383,12 +377,27 @@ async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_popula
         finally:
             if browser:
                 try:
-                    await save_cookies_to_pkl(browser, cookie_filename)
+                    await asyncio.sleep(2)
+                    # Close all tabs individually to prevent exit hangs
+                    if browser.tabs:
+                        for tab in browser.tabs:
+                            try: await tab.close()
+                            except: pass
+                    await asyncio.sleep(1)
+                    
+                    # Standard stop
                     await browser.stop()
                     print(f"Browser stopped for {account_name_key}.")
                     log(f"Browser stopped for {account_name_key}.")
                 except Exception as e_stop:
-                    print(f"Error stopping browser for {account_name_key}: {e_stop}")
+                    log(f"Browser stop error for {account_name_key}: {e_stop}")
+                
+                # Failsafe: Force kill the process if it still exists
+                try:
+                    if hasattr(browser, '_process') and browser._process:
+                        browser._process.kill()
+                except: pass
+
             browser = None
             page = None
     return wf_brokerage_obj_to_populate
@@ -409,9 +418,10 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
 
         log("Navigating to Wells Fargo Advisors homepage.")
         await page.get("https://www.wellsfargoadvisors.com/online-access/signon.htm")
-        await load_cookies_from_pkl(browser, page, cookie_filename)
-        await page.reload()
-        await page.get("https://www.wellsfargoadvisors.com/online-access/signon.htm")
+        # Cookies are now handled by the persistent user profile
+        # await load_cookies_from_pkl(browser, page, cookie_filename)
+        # await page.reload()
+        # await page.get("https://www.wellsfargoadvisors.com/online-access/signon.htm")
 
         log("Locating and filling username field.")
         await browser.sleep(2)

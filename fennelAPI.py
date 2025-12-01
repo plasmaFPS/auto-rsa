@@ -1,9 +1,12 @@
 import os
 import traceback
+from asyncio import AbstractEventLoop
+from typing import TYPE_CHECKING, cast
 
 from dotenv import load_dotenv
-from fennel_invest_api import Fennel, models
-from email_validator import validate_email, EmailNotValidError
+from email_validator import EmailNotValidError, validate_email
+from fennel_invest_api import Fennel
+
 from helperAPI import (
     Brokerage,
     printAndDiscord,
@@ -11,23 +14,22 @@ from helperAPI import (
     stockOrder
 )
 
+if TYPE_CHECKING:
+    from fennel_invest_api.models.accounts_pb2 import Account
 
 def fennel_init(FENNEL_EXTERNAL: str | None = None, botObj=None, loop=None):
+    """Initialize Fennel API."""
     # Initialize .env file
     load_dotenv()
     # Import Fennel account
     fennel_obj = Brokerage("Fennel")
-    if not os.getenv("FENNEL") and FENNEL_EXTERNAL is None:
+    if not os.getenv("FENNEL"):
         print("Fennel not found, skipping...")
         return None
-    FENNEL = (
-        os.environ["FENNEL"].strip().split(",")
-        if FENNEL_EXTERNAL is None
-        else FENNEL_EXTERNAL.strip().split(",")
-    )
+    big_fennel = os.environ["FENNEL"].strip().split(",")
     # Log in to Fennel account
     print("Logging in to Fennel...")
-    for index, account in enumerate(FENNEL):
+    for index, account in enumerate(big_fennel):
         name = f"Fennel {index + 1}"
         try:
             # The hold way was with an email. If we detect email, send message to tell them to switch
@@ -44,21 +46,13 @@ def fennel_init(FENNEL_EXTERNAL: str | None = None, botObj=None, loop=None):
             fb = Fennel(pat_token=account)
             fennel_obj.set_logged_in_object(name, fb, "fb")
             account_info = fb.get_account_info()
-            for i, an in enumerate(account_info):
-                try:
-                    b = fb.get_portfolio_cash_summary(account_id=an.id)
-                    cash_available = b.cash_available
-                except Exception as e:
-                    print(f"{name}: cash summary unavailable ({e}), continuing.")
-                    class Dummy:
-                        cash_available = 0
-                    b = Dummy()
-                    cash_available = b.cash_available
+            for an in account_info:
+                b = fb.get_portfolio_cash_summary(account_id=an.id)
                 fennel_obj.set_account_number(name, an.name)
                 fennel_obj.set_account_totals(
                     name,
                     an.name,
-                    cash_available,
+                    b.cash_available,
                 )
                 fennel_obj.set_logged_in_object(name, an, an.name)
                 print(f"Found {an.name}")
@@ -72,10 +66,11 @@ def fennel_init(FENNEL_EXTERNAL: str | None = None, botObj=None, loop=None):
 
 
 def fennel_holdings(fbo: Brokerage, loop=None):
+    """Retrieve and display all Fennel account holdings."""
     for key in fbo.get_account_numbers():
+        obj = cast("Fennel", fbo.get_logged_in_objects(key, "fb"))
         for account in fbo.get_account_numbers(key):
-            obj: Fennel = fbo.get_logged_in_objects(key, "fb") # pyright: ignore[reportAssignmentType]
-            account_info: models.accounts_pb2.Account = fbo.get_logged_in_objects(key, account)
+            account_info = cast("Account", fbo.get_logged_in_objects(key, account))
             try:
                 # Get account holdings
                 positions = obj.get_portfolio_positions(account_id=account_info.id)
@@ -83,9 +78,7 @@ def fennel_holdings(fbo: Brokerage, loop=None):
                     for holding in positions:
                         if int(holding.shares) == 0:
                             continue
-                        price = holding.value
-                        if price is None:
-                            price = "N/A"
+                        price = holding.value if holding.value is not None else "N/A"
                         fbo.set_holdings(key, account, holding.symbol, holding.shares, price)
             except Exception as e:
                 printAndDiscord(f"Error getting Fennel holdings: {e}")
@@ -95,6 +88,7 @@ def fennel_holdings(fbo: Brokerage, loop=None):
 
 
 def fennel_transaction(fbo: Brokerage, orderObj: stockOrder, loop=None):
+    """Handle Fennel API transactions."""
     print()
     print("==============================")
     print("Fennel")
@@ -107,15 +101,15 @@ def fennel_transaction(fbo: Brokerage, orderObj: stockOrder, loop=None):
                 loop,
             )
             for account in fbo.get_account_numbers(key):
-                obj: Fennel = fbo.get_logged_in_objects(key, "fb") # pyright: ignore[reportAssignmentType]
-                account_info: models.accounts_pb2.Account = fbo.get_logged_in_objects(key, account)
+                obj = cast("Fennel", fbo.get_logged_in_objects(key, "fb"))
+                account_info = cast("Account", fbo.get_logged_in_objects(key, account))
                 try:
                     if not orderObj.get_dry():
                         order = obj.place_order(
                             account_id=account_info.id,
                             symbol=s,
                             shares=orderObj.get_amount(),
-                            side="BUY" if orderObj.get_action().lower() == "buy" else "SELL"
+                            side="BUY" if orderObj.get_action().lower() == "buy" else "SELL",
                         )
                         message = f"Success: {order.success}, Status: {order.status}, ID: {order.id}"
                     else:
