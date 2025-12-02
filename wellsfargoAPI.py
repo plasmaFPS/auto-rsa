@@ -259,9 +259,11 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
             raise Exception("botObj is None. Cannot get OTP from Discord. Check how wellsfargo_run is called from your main script.")
         
         log("Requesting OTP code from Discord.")
-        otp_code = await getOTPCodeDiscord(
-            botObj, "Wells Fargo", timeout=300, loop=discord_loop
+        future = asyncio.run_coroutine_threadsafe(
+            getOTPCodeDiscord(botObj, "Wells Fargo", timeout=300, loop=discord_loop),
+            discord_loop
         )
+        otp_code = await asyncio.wrap_future(future)
         if not otp_code:
             raise Exception("Did not receive Wells Fargo OTP code in time.")
         log("OTP code received.")

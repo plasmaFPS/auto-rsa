@@ -286,7 +286,11 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
                 print(f"\n[ACTION REQUIRED] Enter Chase 2FA Code for {name}: ")
                 code = await asyncio.get_event_loop().run_in_executor(None, input)
             else:
-                code = await getOTPCodeDiscord(botObj, name, code_len=8, timeout=300, loop=discord_loop)
+                future = asyncio.run_coroutine_threadsafe(
+                    getOTPCodeDiscord(botObj, name, code_len=8, timeout=300, loop=discord_loop),
+                    discord_loop
+                )
+                code = await asyncio.wrap_future(future)
             
             if code:
                 await otp_input.send_keys(str(code))
