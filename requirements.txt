@@ -5,7 +5,7 @@ discord.py==2.6.4
 dspac_invest_api==0.1.4
 fennel-invest-api==2.0.0
 # fidelity-api==0.0.16
--e git+https://github.com/ImNotOssy/fidelity-api.git@545040e0b393123d5bf81f9cf7f310c280d9fcd8#egg=fidelity-api
+-e git+https://github.com/ImNotOssy/fidelity-api.git@3a16143f8584dcd76e97d61d11179050b051e886#egg=fidelity-api
 firstrade==0.0.34
 GitPython==3.1.45
 -e git+https://github.com/MaxxRK/playwright_stealth@64856026a91e85f7639c17ddc9cad42496233da9#egg=playwright_stealth
