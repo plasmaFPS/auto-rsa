@@ -155,7 +155,21 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
             if DOCKER:
                 browser_args.extend(["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
             elif headless:
-                browser_args.extend(["--headless=new", "--window-size=1920,1080"])
+                browser_args.extend(["--headless=new", "--window-size=1920,1080", 
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-site-isolation-trials",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-session-crashed-bubble",
+                "--disable-infobars",
+                "--disable-features=TranslateUI,VizDisplayCompositor",
+                "--no-first-run",
+                "--disable-default-apps",
+                "--disable-extensions",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--window-size=1920,1080"])
             else:
                 browser_args.extend([  
                     "--start-maximized",  
@@ -164,7 +178,7 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
                     "--disable-features=TranslateUI,VizDisplayCompositor",
                     "--no-first-run",  
                     "--disable-default-apps",
-                    "--disable-extensions",
+                    "--disable-extensions"
                 ])
 
             profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenChase_{acc_idx + 1}"))
@@ -247,7 +261,7 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
         log(f"Cred entry error (ignorable if logged in): {e}")
 
     # 2FA LOOP: Check for various 2FA screens
-    max_retries = 20 # Increased retries to handle slow page loads
+    max_retries =3 # Increased retries to handle slow page loads
     for i in range(max_retries):
         if "dashboard" in page.url: return True
         if "esasiOptout" in page.url: return True
