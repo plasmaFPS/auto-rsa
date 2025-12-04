@@ -261,7 +261,7 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
         log(f"Cred entry error (ignorable if logged in): {e}")
 
     # 2FA LOOP: Check for various 2FA screens
-    max_retries =3 # Increased retries to handle slow page loads
+    max_retries = 5  # Increased retries slightly
     for i in range(max_retries):
         if "dashboard" in page.url: return True
         if "esasiOptout" in page.url: return True
@@ -292,7 +292,26 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
             await page.sleep(3)
             continue
 
-        # Method 4: OTP Input
+        # Method 4: Push Notification (New - Mobile App)
+        push_notification = await safe_find(page, "#inAppSend", timeout=2)
+        if push_notification:
+            log("Handling 'Confirm using mobile app' (Push Mode)...")
+            await handle_push_verification(page)
+            
+            # Wait loop: Wait up to 120 seconds for user to approve on phone
+            log(f"Waiting 2 minutes for user approval for {name}...")
+            if botObj and discord_loop:
+                printAndDiscord(f"[{name}] Chase Mobile App Push sent. Please approve within 2 minutes.", discord_loop)
+            
+            # Check every 5 seconds if we are logged in
+            for _ in range(24): 
+                if "dashboard" in page.url:
+                    log("Push notification approved, dashboard loaded!")
+                    return True
+                await page.sleep(5)
+            continue
+
+        # Method 5: OTP Input
         otp_input = await safe_find(page, "#otpInput", timeout=2)
         if otp_input:
             log("Handling OTP Input...")
@@ -418,6 +437,31 @@ async def handle_dropdown_verification(page):
         """)
     except Exception as e:
         log(f"Error in dropdown handler: {e}")
+
+async def handle_push_verification(page):
+    """Handles the 'Confirm using our mobile app' selection."""
+    try:
+        # Use JS to click directly
+        await page.evaluate("""
+            (function() {
+                var el = document.querySelector('#inAppSend');
+                if (el) el.click();
+            })();
+        """)
+        log("Clicked #inAppSend via JS")
+        
+        await page.sleep(1)
+        
+        # Sometimes there is a 'Next' button after selecting, 
+        # sometimes it sends immediately. We try clicking next just in case.
+        await page.evaluate("""
+            (function() {
+                var btn = document.querySelector('#next-content');
+                if (btn) btn.click();
+            })();
+        """)
+    except Exception as e:
+        log(f"Error in push handler: {e}")
 
 async def navigate_to_trade_context(page):
     """Navigates to the trade entry page to prime session cookies."""
