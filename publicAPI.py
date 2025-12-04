@@ -1,12 +1,12 @@
 import os
 import traceback
 import uuid
-from decimal import Decimal, ROUND_HALF_UP # Added ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, time
 import pytz
 
 from dotenv import load_dotenv
-from public_api_sdk import ( #type: ignore
+from public_api_sdk import (
     InstrumentType,
     OrderExpirationRequest,
     OrderInstrument,
@@ -19,7 +19,8 @@ from public_api_sdk import ( #type: ignore
     OrderType,
     TimeInForce,
 )
-from public_api_sdk.auth_config import ApiKeyAuthConfig #type: ignore
+from public_api_sdk.auth_config import ApiKeyAuthConfig
+from public_api_sdk.models.order import EquityMarketSession
 from email_validator import validate_email, EmailNotValidError
 
 from helperAPI import (
@@ -268,10 +269,11 @@ def public_transaction(pbo: Brokerage, orderObj: stockOrder, loop=None):
                         ext_preflight_request = PreflightRequest(
                             instrument=OrderInstrument(symbol=s, type=InstrumentType.EQUITY),
                             order_side=OrderSide(order_action),
-                            order_type=OrderType.LIMIT, # Must be LIMIT
-                            expiration=OrderExpirationRequest(time_in_force=TimeInForce.DAY), # DAY is correct
+                            order_type=OrderType.LIMIT,
+                            expiration=OrderExpirationRequest(time_in_force=TimeInForce.DAY),
                             quantity=order_quantity_decimal,
-                            limit_price=limit_price # Use calculated limit price
+                            limit_price=limit_price,
+                            equity_market_session=EquityMarketSession.EXTENDED  # <--- ADD THIS
                         )
                         pf_response = obj.perform_preflight_calculation(ext_preflight_request, account_id=account_id)
                         commission = pf_response.estimated_commission or Decimal("0.00") # Default to 0 if None
@@ -285,15 +287,16 @@ def public_transaction(pbo: Brokerage, orderObj: stockOrder, loop=None):
 
                         # 5. Place Order (if not dry run and commission is zero)
                         if not is_dry_run:
-                            printAndDiscord(f"{log_prefix}: Preflight OK. Placing LIMIT order for {s} at calculated limit {limit_price}...", loop)
+                            printAndDiscord(f"{log_prefix}: Preflight OK. Placing LIMIT order for {s}...", loop)
                             ext_order_request = OrderRequest(
                                 order_id=str(uuid.uuid4()),
                                 instrument=OrderInstrument(symbol=s, type=InstrumentType.EQUITY),
                                 order_side=OrderSide(order_action),
-                                order_type=OrderType.LIMIT, # Must be LIMIT
+                                order_type=OrderType.LIMIT,
                                 expiration=OrderExpirationRequest(time_in_force=TimeInForce.DAY),
                                 quantity=order_quantity_decimal,
-                                limit_price=limit_price # Use calculated limit price
+                                limit_price=limit_price,
+                                equity_market_session=EquityMarketSession.EXTENDED
                             )
                             obj.place_order(ext_order_request, account_id=account_id)
                             printAndDiscord(f"{log_prefix}: LIMIT order for {s} placed successfully.", loop)
