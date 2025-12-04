@@ -173,7 +173,9 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
             else:
                 browser_args.extend([  
                     "--start-maximized",  
-                    "--disable-session-crashed-bubble",  
+                    "--disable-session-crashed-bubble",
+                    "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+                    "--disable-blink-features=AutomationControlled",  
                     "--disable-infobars",  
                     "--disable-features=TranslateUI,VizDisplayCompositor",
                     "--no-first-run",  
