@@ -227,6 +227,14 @@ def fidelity_transaction(
                 # Doesn't have it, skip account
                 continue
 
+            # Check if a specific limit price was set in the order object
+            limit_price = None
+            price_input = orderObj.get_price()
+            
+            # If price is a number (not "market"), pass it as the limit price
+            if isinstance(price_input, (int, float)):
+                limit_price = float(price_input)
+
             # Go trade for all accounts for that stock
             success, error_message = fidelity_browser.transaction(
                 stock,
@@ -234,6 +242,7 @@ def fidelity_transaction(
                 orderObj.get_action(),
                 account_number,
                 orderObj.get_dry(),
+                limit_price=limit_price # Pass the limit price here
             )
             print_account = maskString(account_number)
             # Report error if occurred
