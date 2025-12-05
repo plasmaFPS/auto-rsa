@@ -207,7 +207,7 @@ Made by [ImNotOssy](https://github.com/ImNotOssy) using the [BBAE_investing_API]
 Note: `BBAE_USERNAME` can either be email or phone number.
 
 #### Chase
-Made by [MaxxRK](https://github.com/MaxxRK/) using the [chaseinvest-api](https://github.com/MaxxRK/chaseinvest-api). Go give them a ⭐
+Made by [MaxxRK](https://github.com/MaxxRK/) fixed by [ImNotOssy](https://github.com/ImNotOssy) using the [chaseinvest-api](https://github.com/MaxxRK/chaseinvest-api). Go give them a ⭐
 - `CHASE_USERNAME`
 - `CHASE_PASSWORD`
 - `CELL_PHONE_LAST_FOUR`
@@ -241,7 +241,7 @@ Required `.env` variables:
 Fennel accounts don't have passwords, so you need to login by inputting the code sent to your email. The script will then save your session credentials for future use.
 
 ### Fidelity
-Made by [kennyboy106](https://github.com/kennyboy106) using the [fidelity-api](https://github.com/kennyboy106/fidelity-api). Go give them a ⭐
+Made by [kennyboy106](https://github.com/kennyboy106) fixed by [ImNotOssy](https://github.com/ImNotOssy) using the [fidelity-api](https://github.com/kennyboy106/fidelity-api). Go give them a ⭐
 
 Required `.env` variables:
 - `FIDELITY_USERNAME`
@@ -271,7 +271,7 @@ Required `.env` variables:
 If you get errors after upgrading, try clearing your cookies in the `creds` folder and then trying again.
 
 ### Public
-Made by yours truly using using [public-invest-api](https://github.com/NelsonDane/public-invest-api). Consider giving me a ⭐
+Made by yours truly using using [public-invest-api](https://github.com/NelsonDane/public-invest-api) fixed by [ImNotOssy](https://github.com/ImNotOssy). Consider giving me a ⭐ AND OSSY
 
 Required `.env` variables:
 - `PUBLIC_USERNAME`
@@ -283,7 +283,7 @@ Required `.env` variables:
 Note: Because Windows already has a `PUBLIC` environment variable, you will need to use `PUBLIC_BROKER` instead.
 
 ### Robinhood
-Made using [robin_stocks](https://github.com/jmfernandes/robin_stocks). Go give them a ⭐
+fixed by [ImNotOssy](https://github.com/ImNotOssy) using (https://github.com/jmfernandes/robin_stocks).
 
 Required `.env` variables:
 - `ROBINHOOD_USERNAME`
@@ -394,7 +394,7 @@ Optional `.env` variables:
 - `VANGUARD=VANGUARD_USERNAME:VANGUARD_PASSWORD:PHONE_LAST_FOUR:DEBUG`
 
 ### Wells Fargo
-Made by [PZES](https://github.com/PZES) using Selenium. Go give them a ⭐
+Made by [ImNotOssy](https://github.com/ImNotOssy). Go give them a ⭐
 
 Required `.env` variables:
 - `WELLSFARGO_USERNAME`
