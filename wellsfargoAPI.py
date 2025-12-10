@@ -101,7 +101,6 @@ def wellsfargo_run(orderObj=None, command=None, botObj=None, loop=None, WELLSFAR
     """
     print("Starting Wells Fargo run process...")
     log("wellsfargo_run initiated.")
-    load_dotenv()
     create_creds_folder()
     discord_loop = loop
 
@@ -418,10 +417,6 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
 
         log("Navigating to Wells Fargo Advisors homepage.")
         await page.get("https://www.wellsfargoadvisors.com/online-access/signon.htm")
-        # Cookies are now handled by the persistent user profile
-        # await load_cookies_from_pkl(browser, page, cookie_filename)
-        # await page.reload()
-        # await page.get("https://www.wellsfargoadvisors.com/online-access/signon.htm")
 
         log("Locating and filling username field.")
         await browser.sleep(2)
@@ -569,6 +564,24 @@ async def fetch_initial_account_data(page: uc.Tab, wf_brokerage_obj: Brokerage, 
     except Exception as e:
         await wellsfargo_error(f"Error fetching initial account data for {account_name_key}: {e}", page, discord_loop)
 
+async def _select_dropdown_option(page, dropdown_opener_selector, option_value, timeout=5):
+    """
+    Helper to select an option from a custom dropdown.
+    """
+    try:
+        log(f"Clicking dropdown '{dropdown_opener_selector}' and selecting '{option_value}'.")
+        opener = await page.select(dropdown_opener_selector, timeout=timeout)
+        await opener.click()
+        await asyncio.sleep(0.5)
+        # All usages follow the a[data-val='...'] pattern
+        option_selector = f"a[data-val='{option_value}']"
+        option = await page.select(option_selector, timeout=timeout)
+        await option.click()
+        await asyncio.sleep(1)
+    except asyncio.TimeoutError:
+        raise Exception(f"Failed to select '{option_value}' from dropdown '{dropdown_opener_selector}'.")
+
+
 async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrder, account_name_key: str, browser: uc.Browser, page: uc.Tab, discord_loop):
     log("wellsfargo_transaction started.")
     try:
@@ -641,14 +654,7 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 printAndDiscord(f"Preparing to {action} {quantity} share(s) of {stock_symbol} for account ending in *{account_mask}.", discord_loop)
 
                 # 1. Select Action
-                try:
-                    log(f"Clicking Action dropdown and selecting '{action}'.")
-                    await (await page.select("#BuySellBtn", timeout=5)).click()
-                    await asyncio.sleep(0.5)
-                    await (await page.select(f"a[data-val='{action}']", timeout=5)).click()
-                    await asyncio.sleep(1)
-                except asyncio.TimeoutError:
-                    raise Exception("Failed to select Buy/Sell action.")
+                await _select_dropdown_option(page, "#BuySellBtn", action)
 
                 # 2. Enter Symbol
                 try:
@@ -740,14 +746,7 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     raise Exception("Failed to find the Quantity input field '#OrderQuantity'.")
                 
                 # 5. Select Order Type
-                try:
-                    log(f"Clicking Order Type dropdown and selecting '{order_type}'.")
-                    await (await page.select("#OrderTypeBtn", timeout=5)).click()
-                    await asyncio.sleep(0.5)
-                    await (await page.select(f"a[data-val='{order_type}']", timeout=5)).click()
-                    await asyncio.sleep(1)
-                except asyncio.TimeoutError:
-                    raise Exception("Failed to select Order Type.")
+                await _select_dropdown_option(page, "#OrderTypeBtn", order_type)
 
                 # 6. Enter Limit Price
                 if order_type == "Limit":
@@ -760,14 +759,7 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                         raise Exception("Failed to find Limit Price input field.")
                 
                 # 7. Select Timing
-                try:
-                    log("Clicking Timing dropdown and selecting 'Day'.")
-                    await (await page.select("#TIFBtn", timeout=5)).click()
-                    await asyncio.sleep(0.5)
-                    await (await page.select("a[data-val='Day']", timeout=5)).click()
-                    await asyncio.sleep(1)
-                except asyncio.TimeoutError:
-                    raise Exception("Failed to select Timing.")
+                await _select_dropdown_option(page, "#TIFBtn", "Day")
 
                 # 8. Preview Order
                 try:
