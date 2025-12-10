@@ -73,18 +73,11 @@ SUPPORTED_BROKERS = [
     "webull",
     "wellsfargo",
 ]
-DAY1_BROKERS = [
-    "bbae",
-    "chase",
-    "dspac",
-    "fennel",
-    "firstrade",
+EXTENDED_HOURS = [
     "public",
-    "schwab",
     "sofi",
-    "tastytrade",
-    "tradier",
-    "webull",
+    "vanguard",
+    "fidelity",
 ]
 DISCORD_BOT = False
 DOCKER_MODE = False
@@ -248,14 +241,8 @@ def argParser(args: list) -> stockOrder:
         # Next argument is brokers
         if args[1] == "all":
             orderObj.set_brokers(SUPPORTED_BROKERS)
-        elif args[1] == "day1":
-            orderObj.set_brokers(DAY1_BROKERS)
-        elif args[1] == "most":
-            orderObj.set_brokers(
-                list(filter(lambda x: x != "vanguard", SUPPORTED_BROKERS))
-            )
-        elif args[1] == "fast":
-            orderObj.set_brokers(DAY1_BROKERS + ["robinhood"])
+        elif args[1] == "extended":
+            orderObj.set_brokers(EXTENDED_HOURS)
         else:
             for broker in args[1].split(","):
                 orderObj.set_brokers(nicknames(broker))
@@ -274,12 +261,8 @@ def argParser(args: list) -> stockOrder:
     # Next argument is a broker, set broker
     if args[3] == "all":
         orderObj.set_brokers(SUPPORTED_BROKERS)
-    elif args[3] == "day1":
-        orderObj.set_brokers(DAY1_BROKERS)
-    elif args[3] == "most":
-        orderObj.set_brokers(list(filter(lambda x: x != "vanguard", SUPPORTED_BROKERS)))
-    elif args[3] == "fast":
-        orderObj.set_brokers(DAY1_BROKERS + ["robinhood"])
+    elif args[3] == "extended":
+        orderObj.set_brokers(EXTENDED_HOURS)
     else:
         for broker in args[3].split(","):
             if nicknames(broker) in SUPPORTED_BROKERS:
