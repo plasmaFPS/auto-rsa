@@ -54,9 +54,16 @@ async def wellsfargo_error(error: str, page=None, discord_loop=None, browser=Non
             await page.save_screenshot(filename=screenshot_name)
             print(f"Screenshot saved: {screenshot_name}")
             log(f"Screenshot saved to {screenshot_name}")
+
+            html_name = f"wells-fargo-error-{timestamp}.html"
+            content = await page.get_content()
+            with open(html_name, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"HTML saved: {html_name}")
+            log(f"HTML saved to {html_name}")
         except Exception as e:
-            print(f"Failed to take screenshot: {e}")
-            log(f"Failed to take screenshot: {e}")
+            print(f"Failed to save debug artifacts: {e}")
+            log(f"Failed to save debug artifacts: {e}")
     if discord_loop:
         printAndDiscord(f"Wells Fargo Error: {error}\n{traceback.format_exc()}", discord_loop)
     else:
@@ -152,7 +159,7 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
         # === NEW PUSH NOTIFICATION LOGIC ===
         try:
             # Wait for the page to load and check for the push notification text
-            await page.select("body", timeout=2)
+            await page.select("body", timeout=5)
             content = await page.get_content()
 
             if "We sent a notification to your phone" in content:
@@ -191,81 +198,72 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
                 await asyncio.sleep(5)  # Wait for the next page to load
 
             else:
-                log("Push notification text not found, proceeding to check for other 2FA methods.")
-            
-            log("Looking for 'Text me a code' button...")
-            await asyncio.sleep(2) # Reduced sleep from 20s to 2s
+                log("Push notification text not found. Proceeding with standard 2FA.")
 
-            text_me_btn = await page.find("#optionSMS button", timeout=10)
-
-            if not text_me_btn:
-                raise Exception("Could not find 'Text me a code' button with selector '#optionSMS button'.")
-
-            await text_me_btn.click()
-            log("Clicked 'Text me a code'. Waiting for phone number list.")
-            await asyncio.sleep(5)  # Wait for the next page to load
-
-        except Exception as e_text_btn:
-            raise Exception(f"Error on Step 1 (Text me a code): {e_text_btn}")
-
-        except asyncio.TimeoutError:
-            # This is NOT an error. It just means the page loaded but didn't have the push text.
-            log(
-                "Push notification page not found (timeout). Proceeding with standard 2FA options."
-            )
         except Exception as e_push:
             # An actual error during the push check, but we can still try the other method
             log(
                 f"Error during push notification check: {e_push}. Will attempt standard 2FA."
             )
 
-        # === END NEW PUSH LOGIC / START STANDARD OTP LOGIC ===
-
-        # At this point, we are either:
-        # 1. On the "select method" page from the start.
-        # 2. On the "select method" page after clicking "Try another method".
-
-        # === NEW SEQUENTIAL LOGIC ===
-
-        # Step 2: Find and click the "Mobile" button from the list
-        log("Looking for 'Mobile' phone number button...")
+        log("Step 1: Looking for 'Mobile' phone number option in list...")
+        mobile_selected = False
         try:
-            mobile_btn = None
-            contact_options = await page.select_all('[role="listitem"] button', timeout=10)
+            contact_options = await page.select_all('[role="listitem"] button', timeout=5)
             
-            if not contact_options:
-                raise Exception("Found no phone number options on the page.")
-
-            for option in contact_options:
-                if "Mobile" in option.text_all:
-                    mobile_btn = option
-                    log("Found 'Mobile' button.")
-                    break
-            
-            if not mobile_btn:
-                raise Exception("Could not find 'Mobile' in the list of phone number options.")
-            
-            await mobile_btn.click()
-            log("Mobile/Text option selected. Waiting for OTP input page.")
-            await asyncio.sleep(5)  # Wait for the next page to load
-
-        except Exception as e_mobile_btn:
-            raise Exception(f"Error on Step 2 (Mobile button): {e_mobile_btn}")
-
-
-        # Step 3: Get the OTP code from the user via Discord
-        if not botObj:
-            # This check is still necessary!
-            raise Exception("botObj is None. Cannot get OTP from Discord. Check how wellsfargo_run is called from your main script.")
+            if contact_options:
+                for option in contact_options:
+                    # Check text content for "Mobile"
+                    option_text = option.text_all if hasattr(option, 'text_all') else await option.get_text()
+                    if "Mobile" in option_text:
+                        log("Found 'Mobile' option. Clicking it.")
+                        await option.click()
+                        mobile_selected = True
+                        await asyncio.sleep(3)  # Wait for UI to update/reveal next button
+                        break
+            else:
+                log("No contact options list found (or timed out).")
         
-        log("Requesting OTP code from Discord.")
-        future = asyncio.run_coroutine_threadsafe(
-            getOTPCodeDiscord(botObj, "Wells Fargo", timeout=300, loop=discord_loop),
-            discord_loop
-        )
-        otp_code = await asyncio.wrap_future(future)
+        except Exception as e_mobile:
+            log(f"Error checking/clicking 'Mobile' option: {e_mobile}. Proceeding to next check.")
+
+        # Step 2: Click "Text me a code" / "Get Code" button
+        log("Step 2: Looking for 'Text me a code' button (#optionSMS button)...")
+        try:
+            # We look for the button the user specifically mentioned.
+            text_me_btn = await page.find("#optionSMS button", timeout=5)
+            
+            if text_me_btn:
+                await text_me_btn.click()
+                log("Clicked 'Text me a code' (#optionSMS). Waiting for OTP page.")
+                await asyncio.sleep(5)
+            else:
+                log("'#optionSMS button' not found.")
+                if mobile_selected:
+                    log("Mobile was selected. Assuming we are proceeding to OTP entry or code was sent.")
+        
+        except Exception as e_text:
+            log(f"Error checking/clicking 'Text me a code' button: {e_text}. Proceeding.")
+        
+        # Step 3: Get the OTP code
+        log("Requesting OTP code.")
+        
+        if botObj and discord_loop:
+            # Discord Bot Mode
+            log("Requesting OTP code from Discord.")
+            future = asyncio.run_coroutine_threadsafe(
+                getOTPCodeDiscord(botObj, "Wells Fargo", timeout=300, loop=discord_loop),
+                discord_loop
+            )
+            otp_code = await asyncio.wrap_future(future)
+        else:
+            # CLI / Terminal Mode
+            print("\n!!! WELLS FARGO OTP REQUIRED !!!")
+            # Use run_in_executor to avoid blocking the event loop entirely
+            otp_code = await asyncio.get_event_loop().run_in_executor(None, input, "Please enter Wells Fargo OTP code: ")
+        
         if not otp_code:
-            raise Exception("Did not receive Wells Fargo OTP code in time.")
+            raise Exception("Did not receive Wells Fargo OTP code.")
         log("OTP code received.")
 
         # Step 4: Enter the OTP code
