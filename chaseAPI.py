@@ -577,12 +577,13 @@ async def chase_transaction(cookies, brokerage_obj: Brokerage, orderObj: stockOr
             dry_run = orderObj.get_dry()
             
             log(f"Processing {action} {quantity} {symbol} for account {mask} ({internal_id})")
+            printAndDiscord(f"{login_key}: {action.lower()}ing {quantity} of {symbol}", discord_loop)
 
             try:
                 # 1. Get Quote
                 quote_data = await get_stock_quote(cookies, symbol)
                 if not quote_data:
-                    printAndDiscord(f"Skipping {symbol} in Chase {mask}: Could not fetch quote.", discord_loop)
+                    printAndDiscord(f"{login_key} {mask}: Skipping {symbol}: Could not fetch quote.", discord_loop)
                     continue
                 
                 current_price = float(quote_data.get("lastTradePriceAmount", 0))
@@ -593,22 +594,22 @@ async def chase_transaction(cookies, brokerage_obj: Brokerage, orderObj: stockOr
                 log(f"Quote for {symbol}: {current_price}")
 
                 if dry_run:
-                    printAndDiscord(f"[DRY RUN] Would {action} {quantity} of {symbol} in Chase {mask} @ ~${current_price}", discord_loop)
+                    printAndDiscord(f"{login_key} {mask}: [DRY RUN] Would {action} {quantity} of {symbol} @ ~${current_price}", discord_loop)
                     continue
 
                 # 2. Execute
-                result = await execute_trade_api(cookies, internal_id, symbol, action, quantity, current_price, discord_loop)
+                result = await execute_trade_api(cookies, internal_id, symbol, action, quantity, current_price, discord_loop, login_key, mask)
                 
                 if result:
-                    printAndDiscord(f"Successfully executed {action} for {quantity} {symbol} in Chase {mask}", discord_loop)
+                    printAndDiscord(f"{login_key}: {action} {quantity} of {symbol} in {mask}: Success", discord_loop)
                 else:
-                    printAndDiscord(f"Failed to execute {action} for {symbol} in Chase {mask}", discord_loop)
+                    printAndDiscord(f"{login_key}: Failed to execute {action} for {symbol} in {mask}", discord_loop)
 
             except Exception as e:
-                printAndDiscord(f"Error trading {symbol} in Chase {mask}: {e}", discord_loop)
+                printAndDiscord(f"{login_key} {mask}: Error trading {symbol}: {e}", discord_loop)
                 traceback.print_exc()
 
-async def execute_trade_api(cookies, account_id, symbol, action, quantity, current_price, discord_loop):
+async def execute_trade_api(cookies, account_id, symbol, action, quantity, current_price, discord_loop, login_key, mask):
     headers = get_base_headers()
     
     if action == "BUY":
@@ -624,7 +625,7 @@ async def execute_trade_api(cookies, account_id, symbol, action, quantity, curre
     if current_price > 1.00:
         order_type = "MARKET"
         limit_price = None
-        log(f"Price ${current_price} > $1.00. Using MARKET order.")
+        printAndDiscord(f"{login_key} {mask}: Price ${current_price} > $1.00. Using MARKET order.", discord_loop)
     else:
         order_type = "LIMIT"
         if action == "BUY":
@@ -632,7 +633,7 @@ async def execute_trade_api(cookies, account_id, symbol, action, quantity, curre
         else:
             limit_price = round(current_price - 0.01, 2)
             if limit_price < 0.01: limit_price = 0.01
-        log(f"Price ${current_price} < $1.00. Using LIMIT order @ ${limit_price} (Aggressive).")
+        printAndDiscord(f"{login_key} {mask}: Price ${current_price} < $1.00. Using LIMIT order @ ${limit_price} (Aggressive).", discord_loop)
 
     payload_validate = {
         "accountIdentifier": int(account_id),
@@ -660,7 +661,7 @@ async def execute_trade_api(cookies, account_id, symbol, action, quantity, curre
         
         if resp_val.status_code != 200:
             log(f"Validation Failed ({resp_val.status_code}): {resp_val.text}")
-            printAndDiscord(f"Chase Trade Validation Failed: {resp_val.text[:200]}", discord_loop)
+            printAndDiscord(f"{login_key} {mask}: Trade Validation Failed: {resp_val.text[:200]}", discord_loop)
             return False
             
         val_data = resp_val.json()
@@ -670,7 +671,7 @@ async def execute_trade_api(cookies, account_id, symbol, action, quantity, curre
         for err in error_msgs:
             if "pending a corporate action" in err or "R02675A" in err:
                 log(f"HARD STOP triggered by error: {err}")
-                printAndDiscord(f"BLOCKED: {symbol} is pending corporate action/RSA. Trade aborted in Chase {account_id}.", discord_loop)
+                printAndDiscord(f"{login_key} {mask} BLOCKED: {symbol} is pending corporate action/RSA. Trade aborted.", discord_loop)
                 return False
 
         exchange_id = val_data.get("financialInformationExchangeSystemOrderIdentifier")
@@ -689,7 +690,7 @@ async def execute_trade_api(cookies, account_id, symbol, action, quantity, curre
         
         if resp_exec.status_code != 200:
             log(f"Execution Failed ({resp_exec.status_code}): {resp_exec.text}")
-            printAndDiscord(f"Chase Trade Execution Failed: {resp_exec.text[:200]}", discord_loop)
+            printAndDiscord(f"{login_key} {mask}: Execution Failed: {resp_exec.text[:200]}", discord_loop)
             return False
             
         exec_data = resp_exec.json()
