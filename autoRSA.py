@@ -28,6 +28,7 @@ try:
     from helperAPI import (
         ThreadHandler,
         check_package_versions,
+        maskString,
         printAndDiscord,
         stockOrder,
         updater,
@@ -442,8 +443,12 @@ if __name__ == "__main__":
                             broker_totals[broker] = {
                                 "current_val": 0,
                                 "diff_1d": 0,
+                                "diff_7d": 0,
+                                "diff_14d": 0,
                                 "diff_30d": 0,
                                 "has_1d": False,
+                                "has_7d": False,
+                                "has_14d": False,
                                 "has_30d": False
                             }
                         
@@ -451,6 +456,12 @@ if __name__ == "__main__":
                         if acc["has_1d"]:
                             broker_totals[broker]["diff_1d"] += acc["diff_1d"]
                             broker_totals[broker]["has_1d"] = True
+                        if acc["has_7d"]:
+                            broker_totals[broker]["diff_7d"] += acc["diff_7d"]
+                            broker_totals[broker]["has_7d"] = True
+                        if acc["has_14d"]:
+                            broker_totals[broker]["diff_14d"] += acc["diff_14d"]
+                            broker_totals[broker]["has_14d"] = True
                         if acc["has_30d"]:
                             broker_totals[broker]["diff_30d"] += acc["diff_30d"]
                             broker_totals[broker]["has_30d"] = True
@@ -460,8 +471,12 @@ if __name__ == "__main__":
                             "name": broker,
                             "current_val": totals["current_val"],
                             "diff_1d": totals["diff_1d"],
+                            "diff_7d": totals["diff_7d"],
+                            "diff_14d": totals["diff_14d"],
                             "diff_30d": totals["diff_30d"],
                             "has_1d": totals["has_1d"],
+                            "has_7d": totals["has_7d"],
+                            "has_14d": totals["has_14d"],
                             "has_30d": totals["has_30d"]
                         })
                         
@@ -492,8 +507,12 @@ if __name__ == "__main__":
                             "name": f"{acc['broker']} - {maskString(acc['account'])}",
                             "current_val": acc["current_val"],
                             "diff_1d": acc["diff_1d"],
+                            "diff_7d": acc["diff_7d"],
+                            "diff_14d": acc["diff_14d"],
                             "diff_30d": acc["diff_30d"],
                             "has_1d": acc["has_1d"],
+                            "has_7d": acc["has_7d"],
+                            "has_14d": acc["has_14d"],
                             "has_30d": acc["has_30d"]
                         })
 
@@ -515,13 +534,23 @@ if __name__ == "__main__":
                     if item["has_1d"]:
                         sign = "+" if item["diff_1d"] >= 0 else "-"
                         diff_1d_str = f"{sign}${abs(item['diff_1d']):.2f}"
+
+                    diff_7d_str = "N/A"
+                    if item["has_7d"]:
+                        sign = "+" if item["diff_7d"] >= 0 else "-"
+                        diff_7d_str = f"{sign}${abs(item['diff_7d']):.2f}"
+
+                    diff_14d_str = "N/A"
+                    if item["has_14d"]:
+                        sign = "+" if item["diff_14d"] >= 0 else "-"
+                        diff_14d_str = f"{sign}${abs(item['diff_14d']):.2f}"
                         
                     diff_30d_str = "N/A"
                     if item["has_30d"]:
                         sign = "+" if item["diff_30d"] >= 0 else "-"
                         diff_30d_str = f"{sign}${abs(item['diff_30d']):.2f}"
                     
-                    field_value = f"Current: ${item['current_val']:.2f}\n1 Day: {diff_1d_str}\n30 Days: {diff_30d_str}"
+                    field_value = f"Current: ${item['current_val']:.2f}\n1 Day: {diff_1d_str}\n7 Days: {diff_7d_str}\n14 Days: {diff_14d_str}\n30 Days: {diff_30d_str}"
                     current_embed.add_field(
                         name=item["name"],
                         value=field_value,
@@ -538,11 +567,13 @@ if __name__ == "__main__":
                     )
                 
                 sign_day = "+" if data["total_day_diff"] >= 0 else "-"
+                sign_week = "+" if data["total_week_diff"] >= 0 else "-"
+                sign_two_week = "+" if data["total_two_week_diff"] >= 0 else "-"
                 sign_month = "+" if data["total_month_diff"] >= 0 else "-"
                 
                 current_embed.add_field(
                     name="Total Portfolio",
-                    value=f"Value: ${data['total_current']:.2f}\n1 Day Change: {sign_day}${abs(data['total_day_diff']):.2f}\n30 Day Change: {sign_month}${abs(data['total_month_diff']):.2f}",
+                    value=f"Value: ${data['total_current']:.2f}\n1 Day Change: {sign_day}${abs(data['total_day_diff']):.2f}\n7 Day Change: {sign_week}${abs(data['total_week_diff']):.2f}\n14 Day Change: {sign_two_week}${abs(data['total_two_week_diff']):.2f}\n30 Day Change: {sign_month}${abs(data['total_month_diff']):.2f}",
                     inline=False
                 )
                 embeds_to_send.append(current_embed)
