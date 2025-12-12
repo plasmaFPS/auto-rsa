@@ -386,16 +386,43 @@ if __name__ == "__main__":
         # Help command
         @bot.command()
         async def help(ctx):
-            # String of available commands
-            await ctx.send(
-                "Available RSA commands:\n"
-                "!ping\n"
-                "!help\n"
-                "!rsa history\n"
-                "!rsa holdings [all|<broker1>,<broker2>,...] [not broker1,broker2,...]\n"
-                "!rsa [buy|sell] [amount] [stock1|stock1,stock2] [all|<broker1>,<broker2>,...] [not broker1,broker2,...] [DRY: true|false]\n"
-                "!restart"
+            help_text = (
+                "**RSA Bot Commands**\n\n"
+                
+                "__**1. History & Performance**__\n"
+                "View account value changes (1d, 7d, 14d, 30d).\n"
+                "`!rsa history`\n"
+                "• Shows a summary aggregated by broker.\n"
+                "`!rsa history all`\n"
+                "• Shows detailed performance for **every** individual account.\n"
+                "`!rsa history <broker1>,<broker2>`\n"
+                "• Shows details for specific brokers.\n"
+                "*Example:* `!rsa history fidelity,sofi`\n\n"
+
+                "__**2. Holdings**__\n"
+                "See what stocks you own.\n"
+                "`!rsa holdings <target> [not <exclude>]`\n"
+                "*Example:* `!rsa holdings all`\n"
+                "*Example:* `!rsa holdings extended not fidelity`\n\n"
+
+                "__**3. Trading (Buy/Sell)**__\n"
+                "Place orders across multiple brokers.\n"
+                "`!rsa <buy|sell> <qty> <stocks> <target> [not <exclude>] [false]`\n"
+                "• **Stocks**: Comma separated tickers (e.g. `AAPL,MSFT`).\n"
+                "• **False**: Add `false` at the end to **execute real trades** (disables Dry Run).\n"
+                "*Example:* `!rsa buy 1 NVDA all` (Simulated/Dry Run)\n"
+                "*Example:* `!rsa sell 5 TSLA extended false` (REAL TRADE)\n\n"
+
+                "__**Target Keywords**__\n"
+                "• `all`: Includes ALL supported brokers.\n"
+                "• `extended`: Includes brokers with extended hours support (Fidelity, Public, SoFi, Vanguard).\n"
+                "• **Specific List**: Comma-separated names (e.g. `chase,wellsfargo`).\n\n"
+                
+                "__**Other**__\n"
+                "`!ping` - Check bot connection.\n"
+                "`!restart` - Restart the bot."
             )
+            await ctx.send(help_text)
 
         # Main RSA command
         @bot.command(name="rsa")
