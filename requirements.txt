@@ -4,14 +4,13 @@ curl_cffi==0.13.0
 discord.py==2.6.4
 dspac_invest_api==0.1.4
 fennel-invest-api==2.0.0
-# fidelity-api==0.0.16
--e git+https://github.com/ImNotOssy/fidelity-api.git@d9aefaa317f17867abf848eb89e726a66ec80bdc#egg=fidelity-api
 firstrade==0.0.34
 GitPython==3.1.45
 -e git+https://github.com/MaxxRK/playwright_stealth@64856026a91e85f7639c17ddc9cad42496233da9#egg=playwright_stealth
 -e git+https://github.com/ImNotOssy/Plynk-API@6418c4bd255275b3e42a79c24d56f24eeee1ad86#egg=plynk_api
 #publicdotcom-py==0.1.4
 -e git+https://github.com/ImNotOssy/publicdotcom-py.git@36dff6c7f567919f8af49e7b5f2e02ef502ddfa9#egg=publicdotcom-py
+psutil==7.1.3
 pyotp==2.9.0
 python-dotenv==1.2.1
 requests==2.32.5

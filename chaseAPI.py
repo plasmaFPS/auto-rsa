@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import traceback
+import psutil
 import zendriver as uc
 from zendriver import cdp
 from zendriver.core import util
@@ -50,6 +51,18 @@ API_EXECUTE_SELL = "https://secure.chase.com/svc/wr/dwm/secure/gateway/investmen
 def log(message):
     if DEBUG:
         print(f"[CHASE DEBUG] {message}")
+
+async def clean_existing_chrome_processes():  
+    """Kill any existing Chrome processes that might be from previous crashes"""  
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):  
+        try:  
+            if proc.info['name'] and 'chrome' in proc.info['name'].lower():  
+                cmdline = proc.info['cmdline']  
+                if cmdline and any('--remote-debugging-port' in arg for arg in cmdline):  
+                    print(f"Killing orphaned Chrome process: {proc.info['pid']}")  
+                    proc.kill()  
+        except (psutil.NoSuchProcess, psutil.AccessDenied):  
+            pass
 
 def create_creds_folder():
     if not os.path.exists(COOKIES_PATH):
@@ -186,7 +199,8 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
             profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenChase_{acc_idx + 1}"))
             
             log(f"Starting browser for {account_name_key}...")
-            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
+            await clean_existing_chrome_processes()
+            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path, sandbox=False)
             page = await browser.get(LOGIN_URL) if not browser.tabs else await browser.tabs[0].get(LOGIN_URL)
 
             # 1. Perform Browser Login (UI Interaction)

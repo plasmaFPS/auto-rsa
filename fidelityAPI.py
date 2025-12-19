@@ -1,268 +1,1138 @@
-# Kenneth Tang
-# API to Interface with Fidelity
-# Uses headless Playwright
-# 2024/09/19
-# Adapted from Nelson Dane's Selenium based code and created with the help of playwright codegen
-
 import asyncio
+import datetime
+import psutil  
 import os
 import traceback
-
+import json
+import re
+import csv
+import glob
+import math
+import pyotp
+import pytz
+import zendriver as uc
+from zendriver.core.keys import KeyEvents, SpecialKeys, KeyModifiers
+from zendriver import cdp
+from zendriver import KeyPressEvent  
+from zendriver.core import util
+from zendriver.core.element import Element
 from dotenv import load_dotenv
-from fidelity import fidelity #type: ignore
+import random  
 
 from helperAPI import (
     Brokerage,
     getOTPCodeDiscord,
-    maskString,
     printAndDiscord,
     printHoldings,
     stockOrder,
+    maskString,
 )
 
+load_dotenv()
 
-def fidelity_run(
-    orderObj: stockOrder, command=None, botObj=None, loop=None, FIDELITY_EXTERNAL=None, DOCKER=False, **kwargs
-):
-    """
-    Entry point from main function. Gathers credentials and go through commands for
-    each set of credentials found in the FIDELITY env variable
+# Controls detailed logging
+DEBUG = os.getenv("FIDELITY_DEBUG", "false").lower() == "true"
+COOKIES_PATH = "creds"
 
-    Returns:
-        None
-    """
-    # Initialize .env file
-    load_dotenv()
-    # Import Chase account
+try:
+    fidelity_loop = asyncio.get_event_loop()
+except RuntimeError:
+    fidelity_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(fidelity_loop)
+
+# --- URL Constants ---
+LOGIN_URL = "https://digital.fidelity.com/prgw/digital/login/full-page?AuthRedUrl=https://digital.fidelity.com/ftgw/digital/portfolio/summary"
+LANDING_PAGE = "https://digital.fidelity.com/ftgw/digital/portfolio/summary"
+POSITIONS_URL = "https://digital.fidelity.com/ftgw/digital/portfolio/positions"
+TRADE_URL = "https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry"
+
+def log(message):
+    if DEBUG:
+        print(f"[FIDELITY DEBUG] {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}")
+
+def create_creds_folder():
+    if not os.path.exists(COOKIES_PATH):
+        os.makedirs(COOKIES_PATH)
+
+async def clean_existing_chrome_processes():  
+    """Kill any existing Chrome processes that might be from previous crashes"""  
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):  
+        try:  
+            if proc.info['name'] and 'chrome' in proc.info['name'].lower():  
+                cmdline = proc.info['cmdline']  
+                if cmdline and any('--remote-debugging-port' in arg for arg in cmdline):  
+                    print(f"Killing orphaned Chrome process: {proc.info['pid']}")  
+                    proc.kill()  
+        except (psutil.NoSuchProcess, psutil.AccessDenied):  
+            pass
+
+async def fidelity_error(error: str, page=None, discord_loop=None, browser=None):
+    print(f"Fidelity Error: {error}")
+    log(f"Error encountered: {error}")
+    if page:
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            screenshot_name = f"fidelity_error_{timestamp}.png"
+            await page.save_screenshot(filename=screenshot_name)
+            
+            html_name = f"fidelity_error_{timestamp}.html"
+            content = await page.get_content()
+            with open(html_name, "w", encoding="utf-8") as f:
+                f.write(content)
+                
+            log(f"Debug artifacts saved: {screenshot_name}, {html_name}")
+        except Exception as e:
+            print(f"Failed to save debug artifacts: {e}")
+
+    if discord_loop:
+        printAndDiscord(f"Fidelity Error: {error}", discord_loop)
+    
+    if browser:
+        try:
+            await browser.stop()
+        except:
+            pass
+
+async def get_current_url(page):
+    try:
+        return await page.evaluate("window.location.href")
+    except:
+        return ""
+
+async def type_with_random_delay(element, text, min_delay=0.05, max_delay=0.15):  
+    """Type text with random delays between characters"""  
+    # Get the payloads for each character  
+    payloads = KeyEvents.from_text(text, KeyPressEvent.DOWN_AND_UP)  
+      
+    for payload in payloads:  
+        await element._tab.send(cdp.input_.dispatch_key_event(**payload))  
+        await asyncio.sleep(random.uniform(min_delay, max_delay))  
+
+def fidelity_run(orderObj=None, command=None, botObj=None, loop=None, FIDELITY_EXTERNAL=None, DOCKER=False, **kwargs):
+    print("Starting Fidelity run process...")
+    log("fidelity_run initiated.")
+    create_creds_folder()
+    discord_loop = loop
+
     if not os.getenv("FIDELITY") and FIDELITY_EXTERNAL is None:
-        print("Fidelity not found, skipping...")
+        print("FIDELITY environment variable not found.")
         return None
-    accounts = (
-        os.environ["FIDELITY"].strip().split(",")
-        if FIDELITY_EXTERNAL is None
-        else FIDELITY_EXTERNAL.strip().split(",")
-    )
-    # LOGIC CHANGE HERE:
-    # If DOCKER is True, force headless to False (uses Xvfb)
-    # Otherwise, use the env variable or default to True
-    if DOCKER:
-        print("Fidelity: Running in Docker mode (Non-Headless)")
-        headless = False
+
+    accounts_env = (os.environ.get("FIDELITY", "") if FIDELITY_EXTERNAL is None else FIDELITY_EXTERNAL).strip().split(",")
+    fidelity_brokerage_obj = Brokerage("FIDELITY")
+    
+    # Initialize safely
+    fidelity_brokerage_obj.fidelity_accounts = []
+    
+    if command is None:
+        action_to_perform = "_holdings"
     else:
-        headless = os.getenv("HEADLESS", "true").lower() == "true"
-    # Set the functions to be run
-    _, second_command = command
-
-    # For each set of login info, i.e. separate chase accounts
-    for account in accounts:
-        # Start at index 1 and go to how many logins we have
-        index = accounts.index(account) + 1
-        name = f"Fidelity {index}"
-        # Receive the chase broker class object and the AllAccount object related to it
-        fidelityobj = fidelity_init(
-            account=account,
-            name=name,
-            headless=headless,
-            botObj=botObj,
-            loop=loop,
-        )
-        if fidelityobj is not None:
-            # Store the Brokerage object for fidelity under 'fidelity' in the orderObj
-            orderObj.set_logged_in(fidelityobj, "fidelity")
-            if second_command == "_holdings":
-                fidelity_holdings(fidelityobj, name, loop=loop)
-            # Only other option is _transaction
-            else:
-                fidelity_transaction(fidelityobj, name, orderObj, loop=loop)
-    return None
-
-
-def fidelity_init(account: str, name: str, headless=True, botObj=None, loop=None):
-    """
-    Log into fidelity. Creates a fidelity brokerage object and a FidelityAutomation object.
-    The FidelityAutomation object is stored within the brokerage object and some account information
-    is gathered.
-
-    Post conditions: Logs into fidelity using the supplied credentials
-
-    Returns:
-        fidelity_obj: Brokerage: A fidelity brokerage object that holds information on the account
-        and the webdriver to use for further actions
-    """
-
-    # Log into Fidelity account
-    print("Logging into Fidelity...")
-
-    # Create brokerage class object and call it Fidelity
-    fidelity_obj = Brokerage("Fidelity")
+        _, action_to_perform = command
 
     try:
-        # Split the login into into separate items
-        account = account.split(":")
-        # Create a Fidelity browser object
-        fidelity_browser = fidelity.FidelityAutomation(
-            headless=headless, title=name, profile_path="./creds"
-        )
-
-        # Log into fidelity
-        step_1, step_2 = fidelity_browser.login(
-            account[0], account[1], account[2] if len(account) > 2 else None
-        )
-        # If 2FA is present, ask for code
-        if step_1 and not step_2:
-            if botObj is None and loop is None:
-                fidelity_browser.login_2FA(input("Enter code: "))
-            else:
-                # Should wait for 60 seconds before timeout
-                sms_code = asyncio.run_coroutine_threadsafe(
-                    getOTPCodeDiscord(botObj, name, code_len=6, loop=loop), loop
-                ).result()
-                if sms_code is None:
-                    raise Exception(f"{name} No SMS code found", loop)
-                fidelity_browser.login_2FA(sms_code)
-        elif not step_1:
-            raise Exception(
-                f"{name}: Login Failed. Got Error Page: Current URL: {fidelity_browser.page.url}"
+        populated_obj = fidelity_loop.run_until_complete(
+            _async_fidelity_run_wrapper(
+                accounts_env, fidelity_brokerage_obj, action_to_perform, botObj, discord_loop, orderObj, DOCKER
             )
-
-        # By this point, we should be logged in so save the driver
-        fidelity_obj.set_logged_in_object(name, fidelity_browser)
-
-        # Getting account numbers, names, and balances
-        account_dict = fidelity_browser.getAccountInfo()
-
-        if account_dict is None:
-            raise Exception(f"{name}: Error getting account info")
-        # Set info into fidelity brokerage object
-        for acct in account_dict:
-            fidelity_obj.set_account_number(name, acct)
-            fidelity_obj.set_account_type(name, acct, account_dict[acct]["nickname"])
-            fidelity_obj.set_account_totals(name, acct, account_dict[acct]["balance"])
-        print(f"Logged in to {name}!")
-        return fidelity_obj
+        )
+        if populated_obj and orderObj:
+            orderObj.set_logged_in(populated_obj, 'fidelity')
+        return populated_obj
 
     except Exception as e:
-        print(f"Error logging in to Fidelity: {e}")
-        print(traceback.format_exc())
-        return None
+        print(f"Critical error in Fidelity run: {e}")
+        traceback.print_exc()
+        return fidelity_brokerage_obj
 
+async def _async_fidelity_run_wrapper(accounts_env, brokerage_obj: Brokerage, action, botObj, discord_loop, orderObj, DOCKER=False):
+    headless = os.getenv("HEADLESS", "true").lower() == "true"
+    
+    for acc_idx, account_cred_str in enumerate(accounts_env):
+        account_name_key = f"Fidelity {acc_idx + 1}"
+        browser = None
+        page = None
+        
+        try:
+            browser_args = []
+            if DOCKER:
+                browser_args.extend(["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
+            elif headless:
+                browser_args.extend(["--headless=new", "--window-size=1920,1080", 
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-site-isolation-trials",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-session-crashed-bubble",
+                "--disable-infobars",
+                "--disable-features=TranslateUI,VizDisplayCompositor",
+                "--no-first-run",
+                "--disable-default-apps",
+                "--disable-extensions",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--window-size=1920,1080"])
+            else:
+                browser_args.extend(["--start-maximized", "--disable-session-crashed-bubble", "--disable-infobars"])
 
-def fidelity_holdings(fidelity_o: Brokerage, name: str, loop=None):
-    """
-    Retrieves the holdings per account by reading from the previously downloaded positions csv file.
-    Prints holdings for each account and provides a summary if the user has more than 5 accounts.
-
-    Parameters:
-        fidelity_o: Brokerage: The brokerage object that contains account numbers and the
-        FidelityAutomation class object that is logged into fidelity
-        name: str: The name of this brokerage object (ex: Fidelity 1)
-        loop: AbstractEventLoop: The event loop to be used
-
-    Returns:
-        None
-    """
-
-    # Get the browser back from the fidelity object
-    fidelity_browser: fidelity.FidelityAutomation = fidelity_o.get_logged_in_objects(
-        name
-    )
-    account_dict = fidelity_browser.account_dict
-    for account_number in account_dict:
-
-        for d in account_dict[account_number]["stocks"]:
-            # Append the ticker to the appropriate account
-            fidelity_o.set_holdings(
-                parent_name=name,
-                account_name=account_number,
-                stock=d["ticker"],
-                quantity=d["quantity"],
-                price=d["last_price"],
-            )
-
-    # Print to console and to discord
-    printHoldings(fidelity_o, loop)
-
-    # Close browser
-    fidelity_browser.close_browser()
-
-
-def fidelity_transaction(
-    fidelity_o: Brokerage, name: str, orderObj: stockOrder, loop=None
-):
-    """
-    Using the Brokerage object, call FidelityAutomation.transaction() and process its' return
-
-    Parameters:
-        fidelity_o: Brokerage: The brokerage object that contains account numbers and the
-        FidelityAutomation class object that is logged into fidelity
-        name: str: The name of this brokerage object (ex: Fidelity 1)
-        orderObj: stockOrder: The stock object used for storing stocks to buy or sell
-        loop: AbstractEventLoop: The event loop to be used
-
-    Returns:
-        None
-    """
-
-    # Get the driver
-    fidelity_browser: fidelity.FidelityAutomation = fidelity_o.get_logged_in_objects(
-        name
-    )
-    # Get full list of accounts in case some had no holdings
-    fidelity_browser.get_list_of_accounts()
-    # Go trade
-    for stock in orderObj.get_stocks():
-        # Say what we are doing
-        printAndDiscord(
-            f"{name}: {orderObj.get_action()}ing {orderObj.get_amount()} of {stock}",
-            loop,
-        )
-        # Reload the page incase we were trading before
-        fidelity_browser.page.reload()
-        for account_number in fidelity_browser.account_dict:
-            # If we are selling, check to see if the account has the stock to sell
-            if (
-                orderObj.get_action().lower() == "sell"
-                and stock not in fidelity_browser.get_stocks_in_account(account_number)
-            ):
-                # Doesn't have it, skip account
-                continue
-
-            # Check if a specific limit price was set in the order object
-            limit_price = None
-            price_input = orderObj.get_price()
+            profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenFidelity_{acc_idx + 1}"))
             
-            # If price is a number (not "market"), pass it as the limit price
-            if isinstance(price_input, (int, float)):
-                limit_price = float(price_input)
+            log(f"Starting browser for {account_name_key}...")
+            await clean_existing_chrome_processes()
+            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path, sandbox=False)
+            page = await browser.get(LOGIN_URL) if not browser.tabs else await browser.tabs[0].get(LOGIN_URL)
 
-            # Go trade for all accounts for that stock
-            success, error_message = fidelity_browser.transaction(
-                stock,
-                orderObj.get_amount(),
-                orderObj.get_action(),
-                account_number,
-                orderObj.get_dry(),
-                limit_price=limit_price # Pass the limit price here
-            )
-            print_account = maskString(account_number)
-            # Report error if occurred
+            # Login
+            success = await fidelity_login(page, account_cred_str, account_name_key, botObj, discord_loop)
             if not success:
-                printAndDiscord(
-                    f"{name} account {print_account}: Error: {error_message}",
-                    loop,
-                )
-            # Print test run confirmation if test run
-            elif success and orderObj.get_dry():
-                printAndDiscord(
-                    f"DRY: {name} account {print_account}: {orderObj.get_action()} {orderObj.get_amount()} shares of {stock}",
-                    loop,
-                )
-            # Print real run confirmation if real run
-            elif success and not orderObj.get_dry():
-                printAndDiscord(
-                    f"{name} account {print_account}: {orderObj.get_action()} {orderObj.get_amount()} shares of {stock}",
-                    loop,
-                )
+                raise Exception("Login failed.")
 
-    # Close browser
-    fidelity_browser.close_browser()
+            log(f"Login successful for {account_name_key}!")
+            brokerage_obj.set_logged_in_object(account_name_key, browser)
+
+            # Action
+            if action == "_holdings":
+                await fetch_holdings(page, brokerage_obj, account_name_key, discord_loop)
+            elif action == "_transaction":
+                # Ensure accounts are fetched before transaction
+                await fetch_accounts(page, brokerage_obj, name=account_name_key, loop=discord_loop)
+                await fidelity_transaction(page, brokerage_obj, orderObj, account_name_key, discord_loop)
+
+        except Exception as e:
+            await fidelity_error(f"Error in {account_name_key}: {e}", page, discord_loop, browser)
+        finally:  
+            if browser:  
+                try:  
+                    await asyncio.sleep(2)
+                    for tab in browser.tabs: 
+                        try: await tab.close()  
+                        except: pass  
+                    await asyncio.sleep(1)
+                    await browser.stop()  
+                except: pass
+
+    return brokerage_obj
+
+async def fidelity_login(page, account_cred_str, name, botObj, discord_loop):
+    creds = account_cred_str.split(":")
+    username = creds[0]
+    password = creds[1]
+    totp_secret = creds[2] if len(creds) > 2 else None
+    
+    log(f"Logging in {name}...")
+    
+    curr_url = await get_current_url(page)
+    # Check if we are already logged in (must NOT be on the login page)
+    if "ftgw/digital/portfolio/summary" in curr_url and "login" not in curr_url:
+        log("Already logged in.")
+        return True
+
+    try:
+        user_input = await page.select("#dom-username-input", timeout=5)
+        if not user_input:
+             user_input = await page.select("input[name='username']", timeout=2)
+             if not user_input:
+                 user_input = await page.select("#userId-input", timeout=2)
+
+        if user_input:  
+            await user_input.mouse_move()  
+            await asyncio.sleep(random.uniform(0.1, 0.3))  
+            await user_input.mouse_click()  
+            await asyncio.sleep(random.uniform(0.1, 0.3))  
+            await user_input.clear_input_by_deleting()  
+            await type_with_random_delay(user_input, username)  
+
+        pass_input = await page.select("#dom-pswd-input", timeout=5)
+        if not pass_input:
+            pass_input = await page.select("#password", timeout=5)
+            
+        if pass_input:  
+            await pass_input.mouse_move()  
+            await asyncio.sleep(random.uniform(0.1, 0.3))  
+            await pass_input.mouse_click()  
+            await asyncio.sleep(random.uniform(0.1, 0.3))  
+            await pass_input.clear_input_by_deleting()  
+            await type_with_random_delay(pass_input, password)
+        
+
+        login_clicked = False
+        try:
+            await page.evaluate("""
+                (function() {
+                    const buttons = document.querySelectorAll('button, div[role="button"]');
+                    for (const btn of buttons) {
+                        if (btn.innerText.includes('Log in')) {
+                            btn.click();
+                            return;
+                        }
+                    }
+                    const legacyBtn = document.getElementById('fs-login-button');
+                    if (legacyBtn) legacyBtn.click();
+                })();
+            """)
+            login_clicked = True
+        except Exception as e:
+            log(f"JS Click failed: {e}")
+
+        if not login_clicked:
+             login_btn = await page.find("Log in", timeout=3)
+             if login_btn:
+                 await login_btn.click()
+
+        # Efficient wait loop for Redirection or 2FA
+        log("Waiting for login result (Redirect or 2FA)...")
+        start_time = datetime.datetime.now()
+        
+        # Extended wait for 2FA detection logic
+        while (datetime.datetime.now() - start_time).seconds < 45:
+            curr_url = await get_current_url(page)
+            
+            if "ftgw/digital/portfolio/summary" in curr_url and "login" not in curr_url:
+                log("Redirected to summary. Login Complete.")
+                await page.wait_for_ready_state("complete")
+                await page.wait()
+                await page.sleep(2)
+                return True
+            
+            # Check for various 2FA indicators
+            # 1. TOTP Input
+            # 2. Push Header/Text
+            # 3. Channel Selection Header/Text
+            # 4. OTP Input
+            
+            is_2fa = await page.evaluate("""
+                (function() {
+                    if (document.getElementById('dom-totp-security-code-input')) return true;
+                    if (document.getElementById('dom-push-authenticator-header')) return true;
+                    if (document.getElementById('dom-channel-list-header')) return true;
+                    if (document.getElementById('dom-otp-code-input')) return true;
+                    if (document.querySelector('input[type="tel"]')) return true;
+                    
+                    const buttons = document.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        if (btn.innerText.includes('Text me') || btn.innerText.includes('Call me')) return true;
+                    }
+                    
+                    const headers = document.querySelectorAll('h1');
+                    for (const h of headers) {
+                         if (h.innerText.includes("notification to the Fidelity")) return true;
+                         if (h.innerText.includes("verify it's you")) return true;
+                    }
+                    
+                    return false;
+                })();
+            """)
+            
+            if is_2fa:
+                log("2FA Challenge Detected. Initiating handler...")
+                if await handle_2fa(page, botObj, discord_loop, totp_secret, name):
+                    return True
+                else:
+                    return False
+            
+            await asyncio.sleep(1)
+            
+        log("Login timed out or failed to redirect.")
+        return False
+
+    except Exception as e:
+        log(f"Login exception: {e}")
+        return False
+
+async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
+    try:
+        # Give a moment for the 2FA UI to fully stabilize
+        await page.sleep(2)
+        
+        # -----------------------------------------------------
+        # CASE 1: In-App Push Notification
+        # -----------------------------------------------------
+        # Look for header: "We'll send a notification to the Fidelity Investments app..."
+        push_header = await page.select("#dom-push-authenticator-header", timeout=1)
+        if push_header:
+            log("Push Notification 2FA detected.")
+            
+            # 1. Click 'Don't ask me again' if present
+            await page.evaluate("""
+                (function() {
+                    const cb = document.getElementById('dom-trust-device-checkbox');
+                    if (cb && !cb.checked) {
+                        cb.click();
+                    }
+                })();
+            """)
+
+            await page.sleep(1)
+            
+            # 2. Click 'Send notification' button
+            send_btn = await page.select("#dom-push-primary-button", timeout=2)
+            if send_btn:
+                log("Clicking 'Send notification' button...")
+                await send_btn.mouse_click()
+                
+                # 3. Notify user
+                msg = f"{name}: Fidelity Push Notification Sent. Please approve in app within 2 minutes."
+                log(msg)
+                if botObj and discord_loop:
+                    printAndDiscord(msg, discord_loop)
+                
+                # 4. Wait loop for redirect (2 mins)
+                log("Waiting for push approval...")
+                for _ in range(24): # 24 * 5s = 120s
+                    await page.sleep(5)
+                    curr_url = await get_current_url(page)
+                    if "ftgw/digital/portfolio/summary" in curr_url and "login" not in curr_url:
+                        log("Push approved, redirected successfully.")
+                        return True
+                
+                log("Push notification timed out.")
+                return False
+            else:
+                log("Push notification button not found!")
+
+        # -----------------------------------------------------
+        # CASE 2: SMS/Call Channel Selection
+        # -----------------------------------------------------
+        # Look for header: "To verify it's you, we'll send a temporary code..."
+        channel_header = await page.select("#dom-channel-list-header", timeout=1)
+        if channel_header:
+            log("SMS/Call Selection 2FA detected.")
+            
+            # Select "Text me the code"
+            text_btn = await page.select("#dom-channel-list-primary-button", timeout=2)
+            if text_btn:
+                log("Clicking 'Text me the code'...")
+                await text_btn.click()
+                # Wait for the input screen to load
+                await page.sleep(2)
+            else:
+                log("Text button not found, checking secondary options...")
+                # Could try to find secondary button if primary isn't text, but primary is usually text
+        
+        # -----------------------------------------------------
+        # CASE 3: SMS Input Screen
+        # -----------------------------------------------------
+        # Can appear directly or after Case 2
+        otp_input = await page.select("#dom-otp-code-input", timeout=1)
+        if otp_input:
+            log("SMS OTP Input detected.")
+            
+            code = None
+            if botObj and discord_loop:
+                 future = asyncio.run_coroutine_threadsafe(
+                    getOTPCodeDiscord(botObj, name, code_len=6, timeout=300, loop=discord_loop),
+                    discord_loop
+                 )
+                 code = await asyncio.wrap_future(future)
+            else:
+                 code = await asyncio.get_event_loop().run_in_executor(None, input, f"Enter Fidelity SMS Code for {name}: ")
+            
+            if code:
+                log(f"Entering SMS code...")
+                await otp_input.clear_input()
+                await otp_input.send_keys(code)
+                
+                # Click 'Don't ask me again'
+                await page.evaluate("""
+                    (function() {
+                        const cb = document.getElementById('dom-trust-device-checkbox');
+                        if (cb && !cb.checked) {
+                            cb.click();
+                        }
+                    })();
+                """)
+                await page.sleep(0.5)
+
+                # Click Submit
+                submit_btn = await page.select("#dom-otp-code-submit-button", timeout=2)
+                if submit_btn:
+                    await submit_btn.click()
+                    await page.sleep(5)
+                    
+                    # Wait for redirect
+                    for _ in range(10):
+                        curr_url = await get_current_url(page)
+                        if "ftgw/digital/portfolio/summary" in curr_url and "login" not in curr_url:
+                            return True
+                        await page.sleep(1)
+            
+            return False
+
+        # -----------------------------------------------------
+        # CASE 4: TOTP Authenticator (VIP Access / App Code)
+        # -----------------------------------------------------
+        auth_input = await page.select("#dom-totp-security-code-input", timeout=1)
+        if auth_input:
+            log("TOTP Authenticator detected.")
+            code = None
+            
+            if totp_secret and totp_secret.lower() != "na":
+                try:
+                    totp = pyotp.TOTP(totp_secret.replace(" ", ""))
+                    code = totp.now()
+                    log("Generated TOTP code locally.")
+                except Exception as e:
+                    log(f"Failed to generate TOTP code: {e}")
+            
+            if not code:
+                 if botObj and discord_loop:
+                     future = asyncio.run_coroutine_threadsafe(
+                        getOTPCodeDiscord(botObj, name, code_len=6, timeout=300, loop=discord_loop),
+                        discord_loop
+                     )
+                     code = await asyncio.wrap_future(future)
+                 else:
+                     code = await asyncio.get_event_loop().run_in_executor(None, input, f"Enter Fidelity TOTP for {name}: ")
+            
+            if code:
+                await auth_input.click()
+                await auth_input.send_keys(code)
+                
+                # Trust Device
+                await page.evaluate("""
+                    (function() {
+                        const cb = document.getElementById('dom-trust-device-checkbox');
+                        if (cb && !cb.checked) {
+                            cb.click();
+                        }
+                    })();
+                """)
+                await page.sleep(0.5)
+
+                # Submit (Try specific ID first, fallback to generic logic if ID changed)
+                # The old script used 'dom-totp-code-continue-button', assuming it's still valid or similar
+                continue_btn = await page.select("#dom-totp-code-continue-button", timeout=5)
+                if continue_btn:
+                    await continue_btn.click()
+                    await page.sleep(5)
+                
+                # Wait for redirect
+                for _ in range(15):
+                    curr_url = await get_current_url(page)
+                    if "ftgw/digital/portfolio/summary" in curr_url and "login" not in curr_url:
+                        return True
+                    await page.sleep(1)
+                return False
+
+    except Exception as e:
+        log(f"2FA Error: {e}")
+        traceback.print_exc()
+    return False
+
+async def set_download_path(page, path):
+    try:
+        await page.send(cdp.browser.set_download_behavior(
+            behavior="allow",
+            download_path=path,
+            events_enabled=True
+        ))
+    except Exception as e:
+        log(f"Failed to set download path: {e}")
+
+async def fetch_accounts(page, brokerage_obj, name, loop):
+    """
+    Captures accounts via UI scraping on the Trade page.
+    """
+    log("Fetching accounts info via UI...")
+    found_accounts = []
+
+    try:
+        if TRADE_URL not in await get_current_url(page):
+            await page.get(TRADE_URL)
+        
+        dropdown_selector = "#dest-acct-dropdown"
+        
+        # Wait for dropdown
+        await page.wait_for_ready_state("complete")
+        await page.wait()
+
+        found_dd = False
+        for _ in range(20):
+            if await page.evaluate(f'document.querySelector("{dropdown_selector}") !== null'):
+                found_dd = True
+                break
+            await page.sleep(0.5)
+        
+        if found_dd:
+            # Open dropdown to load list
+            await page.evaluate(f'document.querySelector("{dropdown_selector}").click()')
+            
+            # Scrape items
+            scraped_data = await page.evaluate("""
+                (function() {
+                    const list = document.getElementById("ett-acct-sel-list");
+                    if (!list) return [];
+                    const buttons = list.querySelectorAll('div[role="option"] button');
+                    let results = [];
+                    for (let btn of buttons) {
+                        results.push(btn.innerText.trim());
+                    }
+                    return results;
+                })();
+            """)
+            
+            # Parse scraped strings "Nickname (Number)"
+            for item in scraped_data:
+                match = re.search(r'(.*?)\s*\((Z?\d+)\)', item)
+                if match:
+                    nickname = match.group(1).strip()
+                    acct_num = match.group(2).strip()
+                    found_accounts.append({
+                        "acctNum": acct_num,
+                        "name": nickname,
+                        "type": "Unknown", 
+                        "desc": "Scraped"
+                    })
+                    log(f"Captured Account (UI): {nickname} ({acct_num})")
+        else:
+            log("Trade dropdown not found for account fetch.")
+    except Exception as e:
+        log(f"UI Account Fetch Error: {e}")
+        traceback.print_exc()
+
+    brokerage_obj.fidelity_accounts = found_accounts
+    log(f"Total Accounts Captured: {len(found_accounts)}")
+
+async def fetch_holdings(page, brokerage_obj, name, loop):
+    log("Fetching holdings via CSV...")
+    download_dir = os.path.join(os.getcwd(), "temp_downloads")
+    if not os.path.exists(download_dir):
+        os.makedirs(download_dir)
+    
+    try:
+         for f in glob.glob(os.path.join(download_dir, "*.csv")):
+             os.remove(f)
+    except: pass
+
+    try:
+        await set_download_path(page, download_dir)
+        
+        if "positions" not in await get_current_url(page):
+            await page.get(POSITIONS_URL)
+            await page.wait_for_ready_state("complete")
+            await page.wait()
+            await page.sleep(2)
+            
+        await page.evaluate("""
+            (function() {
+                const buttons = document.querySelectorAll('button');
+                for (const btn of buttons) {
+                    if (btn.innerText.includes('Available Actions')) {
+                        btn.click();
+                        return;
+                    }
+                }
+                const uses = document.querySelectorAll('use');
+                for (const u of uses) {
+                    const href = u.getAttribute('href') || u.getAttribute('xlink:href') || '';
+                    if (href.includes('nav__overflow-vertical')) {
+                        const btn = u.closest('button');
+                        if (btn) {
+                            btn.click();
+                            return;
+                        }
+                    }
+                }
+            })();
+        """)
+        
+        await page.sleep(2)
+        
+        await page.evaluate("""
+            (function() {
+               const buttons = document.querySelectorAll('button, [role="menuitem"]');
+               for (const btn of buttons) {
+                   if (btn.innerText.trim() === 'Download') {
+                       btn.click();
+                       return;
+                   }
+               }
+            })();
+        """)
+        
+        log("Waiting for CSV download...")
+        downloaded_file = None
+        for _ in range(30):
+            files = glob.glob(os.path.join(download_dir, "*.csv"))
+            if files:
+                files.sort(key=os.path.getmtime, reverse=True)
+                downloaded_file = files[0]
+                await asyncio.sleep(1) 
+                break
+            await asyncio.sleep(1)
+            
+        if not downloaded_file:
+            printAndDiscord(f"{name}: Download timed out.", loop)
+            return
+            
+        account_totals = {}
+        seen_accounts = set()
+        
+        with open(downloaded_file, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                acc_num = row.get("Account Number")
+                if not acc_num or "and" in acc_num or str(acc_num).startswith("Y") or not row.get("Symbol"):
+                    continue
+                
+                acc_name = row.get("Account Name", "Current Portfolio")
+                symbol = row.get("Symbol")
+                desc = row.get("Description", "")
+                
+                def clean_num(v):
+                    if not v: return 0.0
+                    try:
+                        clean_v = str(v).replace("$", "").replace(",", "").replace("%", "").strip()
+                        if clean_v in ["--", "n/a", "N/A", "-"]:
+                            return 0.0
+                        return float(clean_v or 0)
+                    except ValueError:
+                        return 0.0
+
+                qty = clean_num(row.get("Quantity"))
+                last_price = clean_num(row.get("Last Price"))
+                current_val = clean_num(row.get("Current Value"))
+                
+                if "Pending" in str(symbol) or "Pending" in desc:
+                     pass
+                if not symbol and "Cash" in desc:
+                     symbol = "CASH"
+                     
+                if acc_num not in seen_accounts:
+                    brokerage_obj.set_account_number(name, acc_num)
+                    brokerage_obj.set_account_type(name, acc_num, acc_name)
+                    seen_accounts.add(acc_num)
+                
+                if acc_num not in account_totals:
+                    account_totals[acc_num] = 0.0
+                account_totals[acc_num] += current_val
+                
+                if symbol and (qty > 0 or current_val > 0):
+                    if not symbol: symbol = "OTHER"
+                    brokerage_obj.set_holdings(name, acc_num, symbol, qty, last_price)
+
+        for acc_num, total in account_totals.items():
+            brokerage_obj.set_account_totals(name, acc_num, total)
+            
+        printHoldings(brokerage_obj, loop)
+
+        try:
+             f.close()
+             os.remove(downloaded_file)
+        except: pass
+        
+    except Exception as e:
+        printAndDiscord(f"{name} Holdings Error: {e}", loop)
+        traceback.print_exc()
+
+async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
+    log("Starting transaction loop...")
+    
+    # Ensure accounts are populated
+    if not hasattr(brokerage_obj, 'fidelity_accounts') or not brokerage_obj.fidelity_accounts:
+        log("Account list not populated, fetching...")
+        await fetch_accounts(page, brokerage_obj, name, loop)
+
+    if not hasattr(brokerage_obj, 'fidelity_accounts') or not brokerage_obj.fidelity_accounts:
+        log("Failed to fetch accounts or no accounts found. Aborting transaction.")
+        return
+
+    accounts_to_process = []
+    # Note: stockOrder class doesn't usually carry a specific account number, 
+    # but we keep this check for compatibility if the object differs.
+    if hasattr(orderObj, 'account_number') and orderObj.account_number:
+        accounts_to_process = [a for a in brokerage_obj.fidelity_accounts if a['acctNum'] == orderObj.account_number]
+        if not accounts_to_process:
+            printAndDiscord(f"{name}: Specified account {orderObj.account_number} not found.", loop)
+            return
+    else:
+        accounts_to_process = brokerage_obj.fidelity_accounts
+
+    # --- Use Getters for stockOrder Object ---
+    try:
+        action_val = orderObj.get_action()
+        quantity_val = orderObj.get_amount()
+        is_dry_run = orderObj.get_dry()
+        symbols = orderObj.get_stocks()
+    except AttributeError:
+        # Fallback if orderObj is not the expected class
+        log("Warning: orderObj missing expected getters, trying attributes...")
+        action_val = getattr(orderObj, 'action', getattr(orderObj, 'order_type', None))
+        quantity_val = getattr(orderObj, 'quantity', None)
+        is_dry_run = getattr(orderObj, 'dry_run', False)
+        single_sym = getattr(orderObj, 'symbol', None)
+        symbols = [single_sym] if single_sym else []
+
+    if not action_val or quantity_val is None or not symbols:
+        log(f"Critical Error: Missing Order Details. Action: {action_val}, Qty: {quantity_val}, Symbols: {symbols}")
+        return
+        
+    action_upper = action_val.upper()
+    
+    # Iterate through symbols to support list of stocks
+    for symbol in symbols:
+        log(f"Processing Symbol: {symbol} ({action_upper})")
+        
+        for account in accounts_to_process:
+            acct_num = account['acctNum']
+            acct_name = account.get('name', 'Unknown')
+            log(f"--- Processing Account: {acct_name} ({acct_num}) for {symbol} ---")
+            
+            try:
+                await page.get(TRADE_URL)
+                await page.wait_for_ready_state("complete")
+                await page.wait()
+                await page.sleep(2)
+                
+                dropdown_selector = "#dest-acct-dropdown"
+                for _ in range(20):
+                    try:
+                        if await page.evaluate(f'document.querySelector("{dropdown_selector}") !== null'):
+                            break
+                    except: pass
+                    await page.sleep(0.5)
+
+                log(f"Selecting Account: {acct_num}")
+                await page.evaluate(f'document.querySelector("{dropdown_selector}").click()')
+                
+                js_select_account = f"""
+                (function() {{
+                    const list = document.getElementById("ett-acct-sel-list");
+                    if (!list) return "List not found";
+                    
+                    const buttons = list.querySelectorAll('div[role="option"] button');
+                    for (let btn of buttons) {{
+                        if (btn.innerText.includes("{acct_num}")) {{
+                            btn.click();
+                            return "Clicked";
+                        }}
+                    }}
+                    return "Account not found in list";
+                }})();
+                """
+                result = await page.evaluate(js_select_account)
+                if result != "Clicked":
+                    log(f"Failed to select account {acct_num}. Skipping.")
+                    continue
+                await page.sleep(2)
+
+                # ---------------------------------------------------------
+                # EXTENDED HOURS LOGIC (Moved to before symbol for correct pricing)
+                # ---------------------------------------------------------
+                et_tz = pytz.timezone('US/Eastern')
+                now_et = datetime.datetime.now(et_tz)
+                current_time = now_et.time()
+                
+                # Fidelity Extended Hours: 
+                # Pre-Market: 7:00 AM - 9:28 AM ET
+                # After-Hours: 4:00 PM - 8:00 PM ET
+                is_extended_time = False
+                if (datetime.time(7, 0) <= current_time <= datetime.time(9, 28)) or \
+                   (datetime.time(16, 0) <= current_time <= datetime.time(20, 0)):
+                    is_extended_time = True
+                
+                if is_extended_time:
+                    log("Current time is within Fidelity Extended Hours window.")
+                    
+                    # 1. Toggle Extended Hours ON
+                    try:
+                        # Check the 'aria-checked' attribute to see if it's already ON
+                        # The ID you provided is 'eq-ticket_extendedhour'
+                        needs_toggle = await page.evaluate("""
+                            (function() {
+                                const btn = document.getElementById('eq-ticket_extendedhour');
+                                if (btn) {
+                                    // If aria-checked is NOT "true", we need to click it
+                                    return btn.getAttribute('aria-checked') !== 'true';
+                                }
+                                return false; // Button not found
+                            })();
+                        """)
+                        
+                        if needs_toggle:
+                            log("Extended Hours switch is OFF. Toggling ON...")
+                            toggle_btn = await page.select("#eq-ticket_extendedhour")
+                            if toggle_btn:
+                                await toggle_btn.click()
+                                await page.sleep(0.5)
+                        else:
+                            log("Extended Hours switch is already ON or not found.")
+                            
+                    except Exception as e:
+                        log(f"Error handling extended hours toggle: {e}")
+
+
+                current_price = 0.0
+                
+                log(f"Entering symbol: {symbol}")
+                
+                # Reverting to send_keys method per user request
+                symbol_input = await page.select("#eq-ticket-dest-symbol")  
+                if symbol_input:
+                    await symbol_input.send_keys(symbol)
+                    # Correct way to press Enter  
+                    await symbol_input.send_keys(SpecialKeys.ENTER)
+                
+                log("Waiting for price data via DOM parsing...")
+                await page.wait_for_ready_state("complete")
+                await page.wait()
+                await page.sleep(2)
+                
+                # Parse DOM for Price (Last, Bid, Ask)
+                price_data = await page.evaluate("""
+                    (function() {
+                        function parsePrice(text) {
+                            if (!text) return 0.0;
+                            return parseFloat(text.replace(/[$,]/g, '').trim()) || 0.0;
+                        }
+
+                        let last = 0.0, bid = 0.0, ask = 0.0;
+                        
+                        // Last Price
+                        const lastEl = document.querySelector('.last-price');
+                        if (lastEl) last = parsePrice(lastEl.innerText);
+
+                        // Bid/Ask blocks
+                        const blocks = document.querySelectorAll('.eq-ticket__quote--block');
+                        for (let block of blocks) {
+                            const title = block.querySelector('.block-title');
+                            const num = block.querySelector('.number');
+                            if (title && num) {
+                                if (title.innerText.includes('Bid')) {
+                                    bid = parsePrice(num.innerText);
+                                } else if (title.innerText.includes('Ask')) {
+                                    ask = parsePrice(num.innerText);
+                                }
+                            }
+                        }
+                        return { last: last, bid: bid, ask: ask };
+                    })();
+                """)
+                
+                last_price = price_data.get('last', 0.0)
+                bid_price = price_data.get('bid', 0.0)
+                ask_price = price_data.get('ask', 0.0)
+                
+                log(f"Scraped Prices - Last: {last_price}, Bid: {bid_price}, Ask: {ask_price}")
+                
+                # Determine Price to Use based on Action
+                # BUY -> Use Ask (paying), Fallback to Last
+                # SELL -> Use Bid (receiving), Fallback to Last
+                if action_upper == "BUY":
+                    if ask_price > 0:
+                        current_price = ask_price
+                    else:
+                        current_price = last_price
+                elif action_upper == "SELL":
+                    if bid_price > 0:
+                        current_price = bid_price
+                    else:
+                        current_price = last_price
+                else:
+                    current_price = last_price
+                
+                log(f"Selected Reference Price for {action_upper}: {current_price}")
+
+                log(f"Selecting Action: {action_upper}")
+                
+                # 1. Open the dropdown
+                action_dropdown = await page.select("#dest-dropdownlist-button-action")
+                await action_dropdown.click()
+                await page.sleep(0.5)
+                
+                # 2. Robust Selection via JavaScript
+                # Fidelity uses specific IDs: #Action0 = Buy, #Action1 = Sell
+                if action_upper == "BUY":  
+                    buy_option = await page.select("#Action0")  
+                    await buy_option.mouse_click()  
+                    await page.sleep(0.5)
+                elif action_upper == "SELL":  
+                    sell_option = await page.select("#Action1")  
+                    await sell_option.mouse_click()
+                    await page.sleep(0.5)
+                
+
+                log(f"Entering Quantity: {quantity_val}")
+                qty_input = await page.select("#eqt-shared-quantity")
+                if qty_input:
+                    await qty_input.clear_input()
+                    await qty_input.send_keys(str(quantity_val))
+                    await page.sleep(0.5)
+
+                order_type_to_use = "Market"
+                limit_price_to_use = None
+
+                # Check for Penny Stock Rule (Price < $1 often requires Limit on Fidelity)
+                if current_price > 0 and current_price < 1.00 and action_upper == 'BUY':
+                    log("Price < $1.00. Forcing LIMIT order.")
+                    order_type_to_use = "Limit"
+                # ---------------------------------------------------------
+                # EXTENDED HOURS ADJUSTMENTS (Moved logic kept here for order type)
+                # ---------------------------------------------------------
+                if is_extended_time:
+                    # 2. Force LIMIT Order (Market is unavailable in Ext Hours)
+                    if order_type_to_use != "Limit":
+                        log("Extended Hours requires LIMIT order. Converting Market -> Limit.")
+                        order_type_to_use = "Limit"
+                        
+                        # 3. Calculate Limit Price (if user didn't provide one)
+                        # We behave like a 'Market' order by setting a Limit at the current Ask/Bid
+                        if not limit_price_to_use:
+                            base_price = last_price
+                            
+                            if action_upper == "BUY":
+                                # Buying: Use Ask Price (or Last + 0.01 buffer)
+                                base_price = ask_price if ask_price > 0 else last_price
+                                if base_price < 1.00:
+                                     limit_price_to_use = round(base_price + 0.001, 4)
+                                else:
+                                     limit_price_to_use = round(base_price + 0.01, 2)
+                            
+                            elif action_upper == "SELL":
+                                # Selling: Use Bid Price (or Last - 0.01 buffer)
+                                base_price = bid_price if bid_price > 0 else last_price
+                                if base_price < 1.00:
+                                     limit_price_to_use = round(base_price - 0.001, 4)
+                                else:
+                                     limit_price_to_use = round(base_price - 0.01, 2)
+                                     
+                            log(f"Calculated Extended Hours Limit Price: {limit_price_to_use}")
+
+                # ---------------------------------------------------------
+                # ORDER TYPE SELECTION (Updated)
+                # ---------------------------------------------------------
+                log(f"Setting Order Type: {order_type_to_use}")
+
+                # 1. Open the Order Type Dropdown
+                type_dropdown = await page.select("#dest-dropdownlist-button-ordertype")
+                await type_dropdown.click()
+                await page.sleep(0.5)
+
+                # 2. Select the specific option using mouse_click
+                # Mapping based on IDs: #Order-type0=Market, #Order-type1=Limit, #Order-type3=Stop Loss, #Order-type4=Stop Limit
+                
+                if order_type_to_use == "Limit":
+                    # Robustly find 'Limit' option, prioritizing text match
+                    # This handles both Standard (usually Type1) and Extended Hours (usually Type0)
+                    target_id = await page.evaluate("""
+                       (function() {
+                           const options = document.querySelectorAll('div[role="option"]');
+                           for (const opt of options) {
+                               if (opt.innerText.trim() === 'Limit') return opt.id;
+                           }
+                           return null;
+                       })();
+                    """)
+                    
+                    if target_id:
+                        option = await page.select(f"#{target_id}")
+                        if option: await option.mouse_click()
+                    else:
+                        # Fallback if text search failed
+                        fallback_id = "#Order-type0" if is_extended_time else "#Order-type1"
+                        option = await page.select(fallback_id)
+                        if option: await option.mouse_click()
+                elif order_type_to_use == "Stop Loss":
+                    option = await page.select("#Order-type3")
+                    await option.mouse_click()
+                elif order_type_to_use == "Stop Limit":
+                    option = await page.select("#Order-type4")
+                    await option.mouse_click()
+                else:
+                    # Default to Market if "Market" or unknown
+                    option = await page.select("#Order-type0")
+                    await option.mouse_click()
+
+                # 4. Handle Limit Price Input (Only if Limit was selected)
+                if order_type_to_use == "Limit":
+                    # Wait a moment for the Limit Price input to appear/become active
+                    
+                    limit_input = await page.select("#eqt-mts-limit-price")  
+                    await limit_input.mouse_click()
+                    await limit_input.focus()
+                    await limit_input.clear_input_by_deleting()
+                    if limit_price_to_use is None:
+                        limit_price_to_use = current_price
+                    await limit_input.send_keys(str(limit_price_to_use))
+                    await page.mouse_click(0,0)
+                    await page.sleep(0.5)
+
+                log("Previewing Order...")
+                
+                # Click Preview Button
+                await page.evaluate("""
+                    (function() {
+                        const wrapper = document.getElementById('previewOrderBtn');
+                        if(wrapper) wrapper.click();
+                    })();
+                """)
+                
+                # Wait for potential error modal or success state
+                await page.sleep(3)
+                
+                # Check for Error Modal
+                preview_error = await page.evaluate("""
+                    (function() {
+                        const modal = document.querySelector('.pvd-modal__dialog');
+                        if (modal) {
+                            # Check if it's an error modal
+                            const heading = modal.querySelector('.pvd-modal__heading');
+                            const isError = heading && heading.innerText.includes('Error');
+                            
+                            if (isError) {
+                                const content = modal.querySelector('.pvd-inline-alert__content');
+                                return content ? content.innerText.trim() : modal.innerText.trim();
+                            }
+                        }
+                        return null;
+                    })();
+                """)
+                
+                if preview_error:
+                    log(f"Preview Failed for {acct_num}: {preview_error}")
+                    # Try to close modal to be clean, though next iteration reloads page
+                    await page.evaluate("try { document.querySelector('.pvd-modal__close-button').click(); } catch(e) {}")
+                    continue
+                
+                log("Preview Successful (No error modal detected).")
+
+                if is_dry_run:
+                    log(f"Dry Run Active. Order NOT placed for {acct_num}.")
+                    printAndDiscord(f"{name} [{acct_num}]: Dry Run Success", loop)
+                else:
+                    log(f"Placing Order for {acct_num}...")
+                    
+                    async with page.expect_response("placeOrder", timeout=20) as place_resp:
+                        await page.evaluate("""
+                            (function() {
+                                const btn = document.getElementById('placeOrderBtn');
+                                if(btn) btn.click();
+                            })();
+                        """)
+                        
+                        try:
+                            await place_resp.value
+                            body, _ = await place_resp.response_body
+                            if body:
+                                if isinstance(body, bytes): body = body.decode('utf-8')
+                                place_data = json.loads(body)
+                                
+                                place_detail = place_data.get("place", {}).get("orderConfirmDetail", {})
+                                place_resp_code = place_detail.get("respTypeCode")
+                                
+                                if place_resp_code == "A":
+                                    conf_num = place_detail.get("confNum", "Unknown")
+                                    log(f"Order Placed Successfully! Conf: {conf_num}")
+                                    printAndDiscord(f"{name} [{acct_num}]: Order Placed ({conf_num})", loop)
+                                else:
+                                    log(f"Order Placement Failed: {place_data}")
+                                    printAndDiscord(f"{name} [{acct_num}]: Order Placement Failed", loop)
+                        except Exception as e:
+                            log(f"Place order capture failed: {e}")
+                            printAndDiscord(f"{name} [{acct_num}]: No Confirmation Response", loop)
+
+            except Exception as e:
+                log(f"Exception processing account {acct_num}: {e}")
+                traceback.print_exc()
+    
+    log("Transaction loop complete.")
