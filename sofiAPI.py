@@ -191,7 +191,6 @@ def sofi_run(
 
             print(f"Starting browser for account {name}...")
             browser = sofi_loop.run_until_complete(uc.start(browser_args=browser_args, user_data_dir=profile_path))
-            printAndDiscord(f"Browser started for {name}. Beginning login sequence...", discord_loop)
 
             sofi_init(
                 account, name, cookie_filename, botObj, browser, discord_loop, sofi_obj
@@ -200,18 +199,18 @@ def sofi_run(
             
             # Verify login by checking if object is populated
             if sofi_obj.get_logged_in_objects(name):
-                printAndDiscord(f"Logged into account {name} successfully.", discord_loop)
+                print(f"Logged into account {name} successfully.", discord_loop)
             else:
-                printAndDiscord(f"Failed to verify login for {name}.", discord_loop)
+                print(f"Failed to verify login for {name}.", discord_loop)
 
             if second_command == "_holdings":
-                printAndDiscord(f"Fetching holdings for {name}...", discord_loop)
+                print(f"Fetching holdings for {name}...", discord_loop)
                 sofi_holdings(browser, name, sofi_obj, discord_loop)
             else:
-                printAndDiscord(f"Beginning transaction process for {name}...", discord_loop)
+                print(f"Beginning transaction process for {name}...", discord_loop)
                 sofi_transaction(browser, orderObj, discord_loop)
             
-            printAndDiscord(f"Process for account {name} completed.", discord_loop)
+            print(f"Process for account {name} completed.", discord_loop)
         
         orderObj.set_logged_in(sofi_obj, 'sofi')
 
@@ -303,7 +302,7 @@ def sofi_init(
         )
         sofi_obj.set_logged_in_object(name, browser)
         log_debug(f"Logged in successfully for {name}.")
-        printAndDiscord(f"Manual login completed for {name}.", discord_loop)
+        print(f"Manual login completed for {name}.", discord_loop)
 
     except Exception as e:
         print(f"Error during SoFi initialization for {name}: {e}")

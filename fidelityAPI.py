@@ -130,11 +130,17 @@ def fidelity_run(orderObj=None, command=None, botObj=None, loop=None, FIDELITY_E
         _, action_to_perform = command
 
     try:
-        populated_obj = fidelity_loop.run_until_complete(
+        # Create a dedicated event loop for this run to avoid conflicts with the main Discord loop
+        local_fidelity_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(local_fidelity_loop)
+        
+        populated_obj = local_fidelity_loop.run_until_complete(
             _async_fidelity_run_wrapper(
                 accounts_env, fidelity_brokerage_obj, action_to_perform, botObj, discord_loop, orderObj, DOCKER
             )
         )
+        local_fidelity_loop.close()
+
         if populated_obj and orderObj:
             orderObj.set_logged_in(populated_obj, 'fidelity')
         return populated_obj
@@ -759,6 +765,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
             acct_num = account['acctNum']
             acct_name = account.get('name', 'Unknown')
             log(f"--- Processing Account: {acct_name} ({acct_num}) for {symbol} ---")
+            printAndDiscord(f"{name}: {action_upper}ing {quantity_val} of {symbol} in {acct_name} ({acct_num})", loop)
             
             try:
                 await page.get(TRADE_URL)
@@ -914,6 +921,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                     current_price = last_price
                 
                 log(f"Selected Reference Price for {action_upper}: {current_price}")
+                printAndDiscord(f"{name}: Current price for {symbol} is ${current_price}", loop)
 
                 log(f"Selecting Action: {action_upper}")
                 
@@ -1080,7 +1088,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
 
                 if is_dry_run:
                     log(f"Dry Run Active. Order NOT placed for {acct_num}.")
-                    printAndDiscord(f"{name} [{acct_num}]: Dry Run Success", loop)
+                    printAndDiscord(f"{name} [{acct_num}]: [DRY RUN] Would {action_upper} {quantity_val} of {symbol} @ ~${limit_price_to_use if limit_price_to_use else current_price}", loop)
                 else:
                     log(f"Placing Order for {acct_num}...")
                     
