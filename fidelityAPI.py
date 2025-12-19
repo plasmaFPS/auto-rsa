@@ -336,7 +336,12 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
         # CASE 1: In-App Push Notification
         # -----------------------------------------------------
         # Look for header: "We'll send a notification to the Fidelity Investments app..."
-        push_header = await page.select("#dom-push-authenticator-header", timeout=1)
+        push_header = None
+        try:
+            push_header = await page.select("#dom-push-authenticator-header", timeout=1)
+        except:
+            push_header = None
+            
         if push_header:
             log("Push Notification 2FA detected.")
             
@@ -382,7 +387,12 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
         # CASE 2: SMS/Call Channel Selection
         # -----------------------------------------------------
         # Look for header: "To verify it's you, we'll send a temporary code..."
-        channel_header = await page.select("#dom-channel-list-header", timeout=1)
+        channel_header = None
+        try:
+            channel_header = await page.select("#dom-channel-list-header", timeout=1)
+        except:
+            channel_header = None
+            
         if channel_header:
             log("SMS/Call Selection 2FA detected.")
             
@@ -401,7 +411,12 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
         # CASE 3: SMS Input Screen
         # -----------------------------------------------------
         # Can appear directly or after Case 2
-        otp_input = await page.select("#dom-otp-code-input", timeout=1)
+        otp_input = None
+        try:
+            otp_input = await page.select("#dom-otp-code-input", timeout=1)
+        except:
+            otp_input = None
+            
         if otp_input:
             log("SMS OTP Input detected.")
             
@@ -449,7 +464,12 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
         # -----------------------------------------------------
         # CASE 4: TOTP Authenticator (VIP Access / App Code)
         # -----------------------------------------------------
-        auth_input = await page.select("#dom-totp-security-code-input", timeout=1)
+        auth_input = None
+        try:
+            auth_input = await page.select("#dom-totp-security-code-input", timeout=1)
+        except:
+            auth_input = None
+            
         if auth_input:
             log("TOTP Authenticator detected.")
             code = None
