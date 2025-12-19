@@ -965,28 +965,26 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                         log("Extended Hours requires LIMIT order. Converting Market -> Limit.")
                         order_type_to_use = "Limit"
                         
-                        # 3. Calculate Limit Price (if user didn't provide one)
-                        # We behave like a 'Market' order by setting a Limit at the current Ask/Bid
-                        if not limit_price_to_use:
-                            base_price = last_price
-                            
-                            if action_upper == "BUY":
-                                # Buying: Use Ask Price (or Last + 0.01 buffer)
-                                base_price = ask_price if ask_price > 0 else last_price
-                                if base_price < 1.00:
-                                     limit_price_to_use = round(base_price + 0.001, 4)
-                                else:
-                                     limit_price_to_use = round(base_price + 0.01, 2)
-                            
-                            elif action_upper == "SELL":
-                                # Selling: Use Bid Price (or Last - 0.01 buffer)
-                                base_price = bid_price if bid_price > 0 else last_price
-                                if base_price < 1.00:
-                                     limit_price_to_use = round(base_price - 0.001, 4)
-                                else:
-                                     limit_price_to_use = round(base_price - 0.01, 2)
-                                     
-                            log(f"Calculated Extended Hours Limit Price: {limit_price_to_use}")
+                    # 3. Calculate Limit Price (if user didn't provide one)
+                    # We behave like a 'Market' order by setting a Limit at the current Ask/Bid
+                    if not limit_price_to_use:
+                        base_price = last_price
+                        
+                        if action_upper == "BUY":
+                            # Buying: Use Ask Price (or Last + 0.01 buffer)
+                            base_price = ask_price if ask_price > 0 else last_price
+                            # Fidelity Extended Hours Requirement: Max 2 decimal places
+                            # Round UP (ceil) to nearest penny to ensure fill and meet requirement
+                            limit_price_to_use = math.ceil(base_price * 100) / 100.0
+                        
+                        elif action_upper == "SELL":
+                            # Selling: Use Bid Price (or Last - 0.01 buffer)
+                            base_price = bid_price if bid_price > 0 else last_price
+                            # Fidelity Extended Hours Requirement: Max 2 decimal places
+                            # Round DOWN (floor) to nearest penny
+                            limit_price_to_use = math.floor(base_price * 100) / 100.0
+                                    
+                        log(f"Calculated Extended Hours Limit Price: {limit_price_to_use}")
 
                 # ---------------------------------------------------------
                 # ORDER TYPE SELECTION (Updated)
@@ -1050,38 +1048,46 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 log("Previewing Order...")
                 
                 # Click Preview Button
-                await page.evaluate("""
-                    (function() {
-                        const wrapper = document.getElementById('previewOrderBtn');
-                        if(wrapper) wrapper.click();
-                    })();
-                """)
+                preview = await page.select("#previewOrderBtn")
+                await preview.mouse_move()
+                await preview.mouse_click()
+                await page.sleep(0.25)
+
                 
                 # Wait for potential error modal or success state
-                await page.sleep(3)
+                await page.sleep(2)
                 
-                # Check for Error Modal
-                preview_error = await page.evaluate("""
-                    (function() {
-                        const modal = document.querySelector('.pvd-modal__dialog');
-                        if (modal) {
-                            # Check if it's an error modal
-                            const heading = modal.querySelector('.pvd-modal__heading');
-                            const isError = heading && heading.innerText.includes('Error');
-                            
-                            if (isError) {
-                                const content = modal.querySelector('.pvd-inline-alert__content');
-                                return content ? content.innerText.trim() : modal.innerText.trim();
-                            }
-                        }
-                        return null;
-                    })();
-                """)
-                
+                # Check for "Place Order" button first (Success Indicator)
+                place_order_btn = None
+                try:
+                    place_order_btn = await page.select("#placeOrderBtn", timeout=2)
+                except:
+                    place_order_btn = None
+                    
+                preview_error = None
+
+                if not place_order_btn:
+                    log("Place Order button not found. Checking for Error Modal...")
+                    # Search for the error content div directly
+                    error_content = await page.select(".pvd-inline-alert__content", timeout=2)
+                    if error_content:
+                        # Found the error text container. Try to read it.
+                        try:
+                            preview_error = await page.evaluate("document.querySelector('.pvd-inline-alert__content').innerText")
+                        except:
+                            preview_error = "Error detected (Could not parse text)"
+                    else:
+                        # Fallback: Check if the modal dialog exists at all
+                        modal_dialog = await page.select(".pvd-modal__dialog", timeout=1)
+                        if modal_dialog:
+                            preview_error = "Error Modal Detected (details could not be parsed)"
+
                 if preview_error:
                     log(f"Preview Failed for {acct_num}: {preview_error}")
-                    # Try to close modal to be clean, though next iteration reloads page
-                    await page.evaluate("try { document.querySelector('.pvd-modal__close-button').click(); } catch(e) {}")
+                    # Try to close modal
+                    close_btn = await page.select(".pvd-modal__close-button", timeout=2)
+                    if close_btn:
+                        await close_btn.click()
                     continue
                 
                 log("Preview Successful (No error modal detected).")
