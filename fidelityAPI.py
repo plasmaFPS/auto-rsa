@@ -254,30 +254,12 @@ async def fidelity_login(page, account_cred_str, name, botObj, discord_loop):
             await pass_input.clear_input_by_deleting()  
             await type_with_random_delay(pass_input, password)
         
-
-        login_clicked = False
-        try:
-            await page.evaluate("""
-                (function() {
-                    const buttons = document.querySelectorAll('button, div[role="button"]');
-                    for (const btn of buttons) {
-                        if (btn.innerText.includes('Log in')) {
-                            btn.click();
-                            return;
-                        }
-                    }
-                    const legacyBtn = document.getElementById('fs-login-button');
-                    if (legacyBtn) legacyBtn.click();
-                })();
-            """)
-            login_clicked = True
-        except Exception as e:
-            log(f"JS Click failed: {e}")
-
-        if not login_clicked:
-             login_btn = await page.find("Log in", timeout=3)
-             if login_btn:
-                 await login_btn.click()
+        login_btn = await page.select("#dom-login-button", timeout=3)
+        if login_btn:
+            await login_btn.mouse_move()
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+            await login_btn.mouse_click()
+            await asyncio.sleep(random.uniform(0.1, 0.3))
 
         # Efficient wait loop for Redirection or 2FA
         log("Waiting for login result (Redirect or 2FA)...")
