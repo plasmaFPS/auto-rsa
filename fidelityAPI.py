@@ -551,8 +551,9 @@ async def fetch_accounts(page, brokerage_obj, name, loop):
         dropdown_selector = "#dest-acct-dropdown"
         
         # Wait for dropdown
-        await page.wait_for_ready_state("complete")
+        await page.wait_for_ready_state("complete", timeout=10)
         await page.wait()
+        await page.sleep(2)
 
         found_dd = False
         for _ in range(20):
@@ -789,7 +790,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
             
             try:
                 await page.get(TRADE_URL)
-                await page.wait_for_ready_state("complete")
+                await page.wait_for_ready_state("complete", timeout=10)
                 await page.wait()
                 await page.sleep(2)
                 
@@ -1068,13 +1069,15 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 log("Previewing Order...")
                 
                 # Click Preview Button
-                preview = await page.select("#previewOrderBtn")
+                preview = await page.select("#previewOrderBtn", timeout=10)
                 await preview.mouse_move()
                 await preview.mouse_click()
                 await page.sleep(0.25)
 
                 
                 # Wait for potential error modal or success state
+                await page.wait_for_ready_state("complete", timeout=10)
+                await page.wait()
                 await page.sleep(2)
                 
                 # Check for "Place Order" button first (Success Indicator)
@@ -1098,7 +1101,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                             preview_error = "Error detected (Could not parse text)"
                     else:
                         # Fallback: Check if the modal dialog exists at all
-                        modal_dialog = await page.select(".pvd-modal__dialog", timeout=1)
+                        modal_dialog = await page.select(".pvd-modal__dialog", timeout=2)
                         if modal_dialog:
                             preview_error = "Error Modal Detected (details could not be parsed)"
 
@@ -1107,7 +1110,8 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                     # Try to close modal
                     close_btn = await page.select(".pvd-modal__close-button", timeout=2)
                     if close_btn:
-                        await close_btn.click()
+                        await close_btn.mouse_move()
+                        await close_btn.mouse_click()
                     continue
                 
                 log("Preview Successful (No error modal detected).")
@@ -1118,34 +1122,14 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 else:
                     log(f"Placing Order for {acct_num}...")
                     
-                    async with page.expect_response("placeOrder", timeout=20) as place_resp:
-                        await page.evaluate("""
-                            (function() {
-                                const btn = document.getElementById('placeOrderBtn');
-                                if(btn) btn.click();
-                            })();
-                        """)
-                        
-                        try:
-                            await place_resp.value
-                            body, _ = await place_resp.response_body
-                            if body:
-                                if isinstance(body, bytes): body = body.decode('utf-8')
-                                place_data = json.loads(body)
-                                
-                                place_detail = place_data.get("place", {}).get("orderConfirmDetail", {})
-                                place_resp_code = place_detail.get("respTypeCode")
-                                
-                                if place_resp_code == "A":
-                                    conf_num = place_detail.get("confNum", "Unknown")
-                                    log(f"Order Placed Successfully! Conf: {conf_num}")
-                                    printAndDiscord(f"{name} [{acct_num}]: Order Placed ({conf_num})", loop)
-                                else:
-                                    log(f"Order Placement Failed: {place_data}")
-                                    printAndDiscord(f"{name} [{acct_num}]: Order Placement Failed", loop)
-                        except Exception as e:
-                            log(f"Place order capture failed: {e}")
-                            printAndDiscord(f"{name} [{acct_num}]: No Confirmation Response", loop)
+                    place_order_btn = await page.select("#placeOrderBtn", timeout=10)
+                    
+                    try:
+                        await place_order_btn.mouse_move()
+                        await place_order_btn.mouse_click()
+                        await page.sleep(0.25)
+                    except Exception as e:
+                        log(f"Place order capture failed: {e}")
 
             except Exception as e:
                 log(f"Exception processing account {acct_num}: {e}")
