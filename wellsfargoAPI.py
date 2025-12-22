@@ -85,7 +85,8 @@ async def wellsfargo_error(error: str, page=None, discord_loop=None, browser=Non
 async def get_current_url(page, discord_loop):
     """Get the current page URL by evaluating JavaScript."""
     log("Attempting to get current URL.")
-    await page.sleep(1)
+    await page.wait_for_ready_state("complete")
+    await page.wait()
     await page.select("body")
     try:
         # Run JavaScript to get the current URL
@@ -189,7 +190,8 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
 
                 # Wait for up to 120 seconds, checking the URL every 2 seconds
                 for _ in range(60):  # 60 * 2 seconds = 120 seconds
-                    await asyncio.sleep(2)
+                    await page.wait_for_ready_state("complete")
+                    await page.wait()
                     current_url = await get_current_url(page, discord_loop)
                     if "brokoverview" in current_url:
                         log("Push notification approved. Login successful.")
@@ -211,9 +213,10 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
                         "Push notification timed out, but could not find the 'Try another method' button."
                     )
 
-                await try_another_method_btn.click()
+                await try_another_method_btn.mouse_click()
                 log("Clicked 'Try another method'. Waiting for options page.")
-                await asyncio.sleep(5)  # Wait for the next page to load
+                await page.wait_for_ready_state("complete")
+                await page.wait()
 
             else:
                 log("Push notification text not found. Proceeding with standard 2FA.")
@@ -235,9 +238,10 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
                     option_text = option.text_all if hasattr(option, 'text_all') else await option.get_text()
                     if "Mobile" in option_text:
                         log("Found 'Mobile' option. Clicking it.")
-                        await option.click()
+                        await option.mouse_click()
                         mobile_selected = True
-                        await asyncio.sleep(3)  # Wait for UI to update/reveal next button
+                        await page.wait_for_ready_state("complete")
+                        await page.wait()
                         break
             else:
                 log("No contact options list found (or timed out).")
@@ -252,9 +256,10 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
             text_me_btn = await page.find("#optionSMS button", timeout=5)
             
             if text_me_btn:
-                await text_me_btn.click()
+                await text_me_btn.mouse_click()
                 log("Clicked 'Text me a code' (#optionSMS). Waiting for OTP page.")
-                await asyncio.sleep(5)
+                await page.wait_for_ready_state("complete")
+                await page.wait()
             else:
                 log("'#optionSMS button' not found.")
                 if mobile_selected:
@@ -297,10 +302,11 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
         if not continue_button:
             raise Exception("Could not find the final 'Continue' submit button.")
 
-        await continue_button.click()
+        await continue_button.mouse_click()
         log("2FA process submitted successfully.")
         # Wait for the login to complete and the main page to load
-        await asyncio.sleep(5)
+        await page.wait_for_ready_state("complete")
+        await page.wait()
 
     except Exception as e:
         # Re-raise to be caught by the main error handler for screenshots
@@ -441,9 +447,10 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
         await page.get("https://www.wellsfargoadvisors.com/online-access/signon.htm")
 
         log("Locating and filling username field.")
-        await browser.sleep(2)
+        await page.wait_for_ready_state("complete")
+        await page.wait()
         username_field = await page.select("input[id=j_username]")
-        await username_field.click()
+        await username_field.mouse_click()
         await username_field.clear_input()
         if not username_field:
             raise Exception("Unable to locate the username input field")
@@ -455,16 +462,18 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
             raise Exception("Unable to locate the password input field")
         await password_field.send_keys(credentials[1])
 
-        await browser.sleep(2)
+        await page.wait_for_ready_state("complete")
+        await page.wait()
 
         log("Clicking login button.")
         login_button = await page.select(".button.button--login.button--signOn", timeout=10)
         if not login_button:
             raise Exception("Login button not found.")
-        await login_button.click()
+        await login_button.mouse_click()
         
         # Give the page a moment to redirect after login click
-        await browser.sleep(4)
+        await page.wait_for_ready_state("complete")
+        await page.wait()
         await page.select("body", timeout=20)
 
         current_url = await get_current_url(page, discord_loop)
@@ -513,9 +522,11 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
 
 async def fetch_initial_account_data(page: uc.Tab, wf_brokerage_obj: Brokerage, account_name_key: str, discord_loop):
     log(f"Fetching initial account data for {account_name_key}.")
-    await page.sleep(5)
+
     try:
         current_url = await get_current_url(page, discord_loop)
+        await page.wait_for_ready_state("complete")
+        await page.wait()
         
         x_param_match = re.search(r'_x=([^&]+)', current_url)
         x_param = f"_x={x_param_match.group(1)}" if x_param_match else ""
@@ -593,13 +604,13 @@ async def _select_dropdown_option(page, dropdown_opener_selector, option_value, 
     try:
         log(f"Clicking dropdown '{dropdown_opener_selector}' and selecting '{option_value}'.")
         opener = await page.select(dropdown_opener_selector, timeout=timeout)
-        await opener.click()
-        await asyncio.sleep(0.5)
+        await opener.mouse_click()
+        
         # All usages follow the a[data-val='...'] pattern
         option_selector = f"a[data-val='{option_value}']"
         option = await page.select(option_selector, timeout=timeout)
-        await option.click()
-        await asyncio.sleep(1)
+        await option.mouse_click()
+        
     except asyncio.TimeoutError:
         raise Exception(f"Failed to select '{option_value}' from dropdown '{dropdown_opener_selector}'.")
 
@@ -627,7 +638,8 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
             trade_url = f"https://wfawellstrade.wellsfargo.com/BW/equity.do?account={account_index}&symbol=&selectedAction=&{dynamic_x_param}"
             log(f"Navigating to trade URL for account index {account_index}: {trade_url}")
             await page.get(trade_url)
-            await asyncio.sleep(3)
+            await page.wait_for_ready_state("complete")
+            await page.wait()
 
             try:
                 # This call finds the element(s)
@@ -666,7 +678,8 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 trade_url = f"https://wfawellstrade.wellsfargo.com/BW/equity.do?account={account_index}&symbol=&selectedAction=&{dynamic_x_param}"
                 log(f"Navigating to fresh trade URL for stock '{stock_symbol}': {trade_url}")
                 await page.get(trade_url)
-                await asyncio.sleep(3)
+                await page.wait_for_ready_state("complete")
+                await page.wait()
 
                 log(f"Processing order for stock: {stock_symbol} in account *{account_mask}")
                 action = orderObj.get_action().capitalize()
@@ -687,7 +700,6 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     await symbol_input.send_keys(SpecialKeys.TAB)
 
                     log("Waiting for quote to load...")
-                    await asyncio.sleep(5)
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find symbol input field.")
 
@@ -762,7 +774,6 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     payloads = KeyEvents.from_text(str(int(quantity)), KeyPressEvent.DOWN_AND_UP)  
                     await quantity_input.send_keys(payloads)
                     await quantity_input.send_keys(SpecialKeys.TAB)
-                    await asyncio.sleep(2)
 
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find the Quantity input field '#OrderQuantity'.")
@@ -787,11 +798,12 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 try:
                     log("Clicking PREVIEW ORDER button.")
                     preview_button = await page.select("#actionbtnContinue", timeout=5)
-                    await preview_button.click()
+                    await preview_button.mouse_click()
                     log("Preview Order button clicked. Waiting for next page to load.")
-                    await asyncio.sleep(5) 
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find or click the Preview Order button.")
+                await page.wait_for_ready_state("complete")
+                await page.wait()
 
                 # 9. Check for Confirmation Button (Hard Error Path)
                 try:
@@ -836,10 +848,11 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     try:
                         log("Attempting to click the final 'SUBMIT ORDER' button.")
                         # We use the 'confirm_button' element we already found in step 9
-                        await confirm_button.click()
+                        await confirm_button.mouse_click()
                         printAndDiscord(f"Successfully placed order for {action} {quantity} of {stock_symbol}.", discord_loop)
                         log("Final order placed successfully.")
-                        await asyncio.sleep(5)
+                        await page.wait_for_ready_state("complete")
+                        await page.wait()
                     except Exception as e:
                         # This catch is for potential errors during the final click itself
                         raise Exception(f"An error occurred while clicking the final 'SUBMIT ORDER' button: {e}")
@@ -892,7 +905,8 @@ async def wellsfargo_holdings(wf_brokerage_obj: Brokerage, account_name_key: str
                 
                 log(f"Navigating to holdings URL: {holdings_url}")
                 await page.get(holdings_url)
-                await asyncio.sleep(5)
+                await page.wait_for_ready_state("complete")
+                await page.wait()
                 
                 await extract_holdings_from_table(page, wf_brokerage_obj, account_name_key, account_id, discord_loop)
                 
