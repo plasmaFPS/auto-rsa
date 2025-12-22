@@ -34,12 +34,6 @@ load_dotenv()
 DEBUG = os.getenv("FIDELITY_DEBUG", "false").lower() == "true"
 COOKIES_PATH = "creds"
 
-try:
-    fidelity_loop = asyncio.get_event_loop()
-except RuntimeError:
-    fidelity_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(fidelity_loop)
-
 # --- URL Constants ---
 LOGIN_URL = "https://digital.fidelity.com/prgw/digital/login/full-page?AuthRedUrl=https://digital.fidelity.com/ftgw/digital/portfolio/summary"
 LANDING_PAGE = "https://digital.fidelity.com/ftgw/digital/portfolio/summary"
@@ -112,10 +106,16 @@ def fidelity_run(orderObj=None, command=None, botObj=None, loop=None, FIDELITY_E
     print("Starting Fidelity run process...")
     log("fidelity_run initiated.")
     create_creds_folder()
+    
+    # Create a dedicated event loop for this run
+    local_fidelity_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(local_fidelity_loop)
+    
     discord_loop = loop
 
     if not os.getenv("FIDELITY") and FIDELITY_EXTERNAL is None:
         print("FIDELITY environment variable not found.")
+        local_fidelity_loop.close()
         return None
 
     accounts_env = (os.environ.get("FIDELITY", "") if FIDELITY_EXTERNAL is None else FIDELITY_EXTERNAL).strip().split(",")
@@ -130,17 +130,12 @@ def fidelity_run(orderObj=None, command=None, botObj=None, loop=None, FIDELITY_E
         _, action_to_perform = command
 
     try:
-        # Create a dedicated event loop for this run to avoid conflicts with the main Discord loop
-        local_fidelity_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(local_fidelity_loop)
-        
         populated_obj = local_fidelity_loop.run_until_complete(
             _async_fidelity_run_wrapper(
                 accounts_env, fidelity_brokerage_obj, action_to_perform, botObj, discord_loop, orderObj, DOCKER
             )
         )
-        local_fidelity_loop.close()
-
+        
         if populated_obj and orderObj:
             orderObj.set_logged_in(populated_obj, 'fidelity')
         return populated_obj
@@ -149,6 +144,12 @@ def fidelity_run(orderObj=None, command=None, botObj=None, loop=None, FIDELITY_E
         print(f"Critical error in Fidelity run: {e}")
         traceback.print_exc()
         return fidelity_brokerage_obj
+    finally:
+        try:
+            local_fidelity_loop.close()
+            log("Local event loop closed.")
+        except Exception as e_loop:
+            log(f"Error closing local loop: {e_loop}")
 
 async def _async_fidelity_run_wrapper(accounts_env, brokerage_obj: Brokerage, action, botObj, discord_loop, orderObj, DOCKER=False):
     headless = os.getenv("HEADLESS", "true").lower() == "true"
@@ -161,7 +162,7 @@ async def _async_fidelity_run_wrapper(accounts_env, brokerage_obj: Brokerage, ac
         try:
             browser_args = []
             if DOCKER:
-                browser_args.extend(["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
+                browser_args.extend(["--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
             elif headless:
                 browser_args.extend(["--headless=new", "--window-size=1920,1080", 
                 "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
@@ -174,7 +175,6 @@ async def _async_fidelity_run_wrapper(accounts_env, brokerage_obj: Brokerage, ac
                 "--no-first-run",
                 "--disable-default-apps",
                 "--disable-extensions",
-                "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--window-size=1920,1080"])
@@ -183,9 +183,11 @@ async def _async_fidelity_run_wrapper(accounts_env, brokerage_obj: Brokerage, ac
 
             profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenFidelity_{acc_idx + 1}"))
             
+            browser_args.append("--force-device-scale-factor=0.8")
+
             log(f"Starting browser for {account_name_key}...")
             await clean_existing_chrome_processes()
-            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path, sandbox=False)
+            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
             page = await browser.get(LOGIN_URL) if not browser.tabs else await browser.tabs[0].get(LOGIN_URL)
 
             # Login

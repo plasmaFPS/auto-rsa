@@ -26,12 +26,6 @@ load_dotenv()
 DEBUG = os.getenv("CHASE_DEBUG", "false").lower() == "true"
 COOKIES_PATH = "creds"
 
-try:
-    chase_loop = asyncio.get_event_loop()
-except RuntimeError:
-    chase_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(chase_loop)
-
 # --- URL Constants ---
 LOGIN_URL = "https://secure05c.chase.com/web/auth/#/logon/logon/chaseOnline"
 LANDING_PAGE = "https://secure.chase.com/web/auth/dashboard#/dashboard/overview"
@@ -126,10 +120,16 @@ def chase_run(orderObj=None, command=None, botObj=None, loop=None, CHASE_EXTERNA
     print("Starting Chase run process...")
     load_dotenv()
     create_creds_folder()
+    
+    # Create a new local event loop for this thread
+    local_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(local_loop)
+    
     discord_loop = loop
 
     if not os.getenv("CHASE") and CHASE_EXTERNAL is None:
         print("CHASE environment variable not found.")
+        local_loop.close()
         return None
 
     accounts_env = (os.environ.get("CHASE", "") if CHASE_EXTERNAL is None else CHASE_EXTERNAL).strip().split(",")
@@ -141,7 +141,8 @@ def chase_run(orderObj=None, command=None, botObj=None, loop=None, CHASE_EXTERNA
         _, action_to_perform = command
 
     try:
-        populated_obj = chase_loop.run_until_complete(
+        # Run the async process using the local_loop
+        populated_obj = local_loop.run_until_complete(
             _async_chase_run_wrapper(
                 accounts_env, chase_brokerage_obj, action_to_perform, botObj, discord_loop, orderObj, DOCKER
             )
@@ -154,6 +155,12 @@ def chase_run(orderObj=None, command=None, botObj=None, loop=None, CHASE_EXTERNA
         print(f"Critical error in Chase run: {e}")
         traceback.print_exc()
         return chase_brokerage_obj
+    finally:
+        try:
+            local_loop.close()
+            log("Local event loop closed.")
+        except Exception as e_loop:
+            log(f"Error closing local loop: {e_loop}")
 
 async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, action, botObj, discord_loop, orderObj, DOCKER=False):
     headless = os.getenv("HEADLESS", "true").lower() == "true"
@@ -166,7 +173,7 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
         try:
             browser_args = []
             if DOCKER:
-                browser_args.extend(["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
+                browser_args.extend(["--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
             elif headless:
                 browser_args.extend(["--headless=new", "--window-size=1920,1080", 
                 "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
@@ -179,7 +186,6 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
                 "--no-first-run",
                 "--disable-default-apps",
                 "--disable-extensions",
-                "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--window-size=1920,1080"])
@@ -198,9 +204,11 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
 
             profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenChase_{acc_idx + 1}"))
             
+            browser_args.append("--force-device-scale-factor=0.8")
+
             log(f"Starting browser for {account_name_key}...")
             await clean_existing_chrome_processes()
-            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path, sandbox=False)
+            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
             page = await browser.get(LOGIN_URL) if not browser.tabs else await browser.tabs[0].get(LOGIN_URL)
 
             # 1. Perform Browser Login (UI Interaction)
@@ -333,6 +341,7 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
             log("Handling OTP Input...")
             if botObj is None:
                 print(f"\n[ACTION REQUIRED] Enter Chase 2FA Code for {name}: ")
+                # Use run_in_executor with the CURRENT loop (which is the local_loop we set)
                 code = await asyncio.get_event_loop().run_in_executor(None, input)
             else:
                 future = asyncio.run_coroutine_threadsafe(

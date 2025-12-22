@@ -28,13 +28,6 @@ def log(message):
         print(f"[DEBUG] {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}")
 
 COOKIES_PATH = "creds"
-# wf_loop for Wells Fargo specific asyncio operations
-try:
-    wf_loop = asyncio.get_event_loop()
-except RuntimeError:
-    wf_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(wf_loop)
-
 
 async def clean_existing_chrome_processes():  
     """Kill any existing Chrome processes that might be from previous crashes"""  
@@ -55,7 +48,6 @@ def create_creds_folder():
     if not os.path.exists(COOKIES_PATH):
         os.makedirs(COOKIES_PATH)
         log("'creds' folder created.")
-
 
 
 async def wellsfargo_error(error: str, page=None, discord_loop=None, browser=None):
@@ -111,10 +103,15 @@ def wellsfargo_run(orderObj=None, command=None, botObj=None, loop=None, WELLSFAR
     """
     Main function to run Wells Fargo operations using asyncio.
     This function itself is synchronous and designed to be called from a synchronous context (like autoRSA's fun_run).
-    It then runs the async parts using the globally defined wf_loop.
+    It then runs the async parts using a local event loop.
     """
     print("Starting Wells Fargo run process...")
     log("wellsfargo_run initiated.")
+    
+    # Create a new local event loop for this thread/process
+    local_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(local_loop)
+    
     create_creds_folder()
     discord_loop = loop
 
@@ -124,6 +121,7 @@ def wellsfargo_run(orderObj=None, command=None, botObj=None, loop=None, WELLSFAR
         if discord_loop:
             printAndDiscord(errmsg, discord_loop)
         log("WELLSFARGO environment variable not set. Exiting.")
+        local_loop.close()
         return None
 
     accounts_env_str = os.environ.get("WELLSFARGO", "") if WELLSFARGO_EXTERNAL is None else WELLSFARGO_EXTERNAL
@@ -139,8 +137,8 @@ def wellsfargo_run(orderObj=None, command=None, botObj=None, loop=None, WELLSFAR
     log(f"Action to perform: {action_to_perform}")
 
     try:
-        # Run the async process and get the populated object back
-        populated_obj = wf_loop.run_until_complete(
+        # Run the async process using the local_loop
+        populated_obj = local_loop.run_until_complete(
             _async_wellsfargo_run_wrapper(
                 accounts_env,
                 final_wf_brokerage_obj,
@@ -163,6 +161,13 @@ def wellsfargo_run(orderObj=None, command=None, botObj=None, loop=None, WELLSFAR
         log(f"Critical error in async wrapper: {e}\n{traceback.format_exc()}")
         print(traceback.format_exc())
         return final_wf_brokerage_obj
+    finally:
+        # Clean up the loop
+        try:
+            local_loop.close()
+            log("Local event loop closed.")
+        except Exception as e_loop:
+            log(f"Error closing local loop: {e_loop}")
 
 
 async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
@@ -317,7 +322,7 @@ async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_popula
         try:
             browser_args = []
             if DOCKER:
-                browser_args.extend(["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
+                browser_args.extend(["--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
             elif headless:
                 browser_args.extend(["--headless=new", "--window-size=1920,1080"])
             else:
@@ -336,9 +341,11 @@ async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_popula
             if not os.path.exists(profile_path):
                 os.makedirs(profile_path)
 
+            browser_args.append("--force-device-scale-factor=0.8")
+
             log("Starting browser...")
             await clean_existing_chrome_processes()
-            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path, sandbox=False)
+            browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
             
             if not browser.tabs:
                 page = await browser() 

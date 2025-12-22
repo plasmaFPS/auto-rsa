@@ -140,7 +140,7 @@ def fun_run(orderObj: stockOrder, command, botObj=None, loop=None):
                     orderObj.set_logged_in(
                         globals()[fun_name](botObj=botObj, loop=loop), broker
                     )
-                elif broker.lower() in ["chase", "vanguard"]:
+                elif broker.lower() in ["vanguard"]:
                     # These use existing logic without DOCKER arg
                     fun_name = broker + "_run"
                     th = ThreadHandler(
@@ -160,7 +160,7 @@ def fun_run(orderObj: stockOrder, command, botObj=None, loop=None):
                             + ": Function did not complete successfully."
                         )
                         
-                elif broker.lower() in ["sofi", "wellsfargo", "fidelity"]:
+                elif broker.lower() in ["sofi", "wellsfargo", "fidelity", "chase"]:
                     # These now accept the DOCKER argument
                     fun_name = broker + "_run"
                     th = ThreadHandler(
