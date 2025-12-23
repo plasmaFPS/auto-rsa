@@ -85,10 +85,10 @@ async def wellsfargo_error(error: str, page=None, discord_loop=None, browser=Non
 async def get_current_url(page, discord_loop):
     """Get the current page URL by evaluating JavaScript."""
     log("Attempting to get current URL.")
-    await page.wait_for_ready_state("complete")
-    await page.wait()
-    await page.select("body")
     try:
+        await page.wait_for_ready_state("complete", timeout=20)
+        await page.select("body")
+        
         # Run JavaScript to get the current URL
         current_url = await page.evaluate("window.location.href")
         log(f"Current URL is: {current_url}")
@@ -178,7 +178,9 @@ async def handle_wellsfargo_2fa(page: uc.Tab, botObj, discord_loop):
         # === NEW PUSH NOTIFICATION LOGIC ===
         try:
             # Wait for the page to load and check for the push notification text
-            await page.select("body", timeout=5)
+            await page.wait_for_ready_state("complete")
+            await page.wait()
+            await page.sleep(1)
             content = await page.get_content()
 
             if "We sent a notification to your phone" in content:
@@ -472,9 +474,9 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
         await login_button.mouse_click()
         
         # Give the page a moment to redirect after login click
-        await page.wait_for_ready_state("complete")
+        await page.wait_for_ready_state("complete", timeout=20)
         await page.wait()
-        await page.select("body", timeout=20)
+        await page.sleep(1)
 
         current_url = await get_current_url(page, discord_loop)
 
@@ -522,11 +524,11 @@ async def wellsfargo_init(account_cred_str: str, account_name_key: str, cookie_f
 
 async def fetch_initial_account_data(page: uc.Tab, wf_brokerage_obj: Brokerage, account_name_key: str, discord_loop):
     log(f"Fetching initial account data for {account_name_key}.")
-
     try:
-        current_url = await get_current_url(page, discord_loop)
         await page.wait_for_ready_state("complete")
         await page.wait()
+        await page.sleep(1)
+        current_url = await get_current_url(page, discord_loop)
         
         x_param_match = re.search(r'_x=([^&]+)', current_url)
         x_param = f"_x={x_param_match.group(1)}" if x_param_match else ""
@@ -695,11 +697,15 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 try:
                     log(f"Entering symbol: {stock_symbol}")
                     symbol_input = await page.select("#Symbol", timeout=5)
+                    await symbol_input.scroll_into_view()
                     await symbol_input.send_keys(stock_symbol)
 
                     await symbol_input.send_keys(SpecialKeys.TAB)
 
                     log("Waiting for quote to load...")
+                    await page.wait_for_ready_state("complete")
+                    await page.wait()
+                    await page.sleep(1)
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find symbol input field.")
 
@@ -743,6 +749,7 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 try:
                     # The 'select' method will wait up to 10 seconds for the element to appear.
                     last_price_element = await page.select("#last", timeout=10)
+                    await last_price_element.scroll_into_view()
 
                     # Add a check to ensure the element was actually found before using it.
                     if not last_price_element:
@@ -765,7 +772,8 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 try:
                     log(f"Entering quantity: {quantity}")
                     # First, select the input element by its ID
-                    quantity_input = await page.select("#OrderQuantity", timeout=5)
+                    quantity_input = await page.select("#OrderQuantity", timeout=10)
+                    await quantity_input.scroll_into_view()
                     
                     # Clear any default value (like '0') that might be in the box
                     await quantity_input.clear_input()
@@ -774,6 +782,9 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     payloads = KeyEvents.from_text(str(int(quantity)), KeyPressEvent.DOWN_AND_UP)  
                     await quantity_input.send_keys(payloads)
                     await quantity_input.send_keys(SpecialKeys.TAB)
+                    await page.wait_for_ready_state("complete", timeout=20)
+                    await page.wait()
+                    await page.sleep(1)
 
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find the Quantity input field '#OrderQuantity'.")
@@ -786,7 +797,8 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     try:
                         limit_price = round(last_price + 0.01, 2) if action == "Buy" else round(last_price - 0.01, 2)
                         log(f"Calculating and entering Limit Price: ${limit_price}")
-                        limit_input = await page.select("#Price", timeout=5)
+                        limit_input = await page.select("#Price", timeout=10)
+                        await limit_input.scroll_into_view()
                         await limit_input.send_keys(str(limit_price))
                     except asyncio.TimeoutError:
                         raise Exception("Failed to find Limit Price input field.")
@@ -797,26 +809,29 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 # 8. Preview Order
                 try:
                     log("Clicking PREVIEW ORDER button.")
-                    preview_button = await page.select("#actionbtnContinue", timeout=5)
+                    preview_button = await page.select("#actionbtnContinue", timeout=10)
+                    await preview_button.scroll_into_view()
                     await preview_button.mouse_click()
                     log("Preview Order button clicked. Waiting for next page to load.")
+                    await page.wait_for_ready_state("complete", timeout=20)
+                    await page.wait()
+                    await page.sleep(0.25)
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find or click the Preview Order button.")
-                await page.wait_for_ready_state("complete")
-                await page.wait()
 
                 # 9. Check for Confirmation Button (Hard Error Path)
                 try:
                     # The key check: Can we find the final SUBMIT button?
                     # If we can't, it means we hit a hard error page.
-                    confirm_button = await page.select(".btn-wfa-primary.btn-wfa-submit", timeout=5)
+                    confirm_button = await page.select(".btn-wfa-primary.btn-wfa-submit", timeout=10)
+                    await confirm_button.scroll_into_view()
                     log("Confirmation button found. The trade is placeable.")
                 except asyncio.TimeoutError:
                     # This is the HARD ERROR path. The submit button doesn't exist.
                     log("Confirmation button NOT found. Assuming a hard trade error occurred.")
                     try:
                         # Now, find the error message to report it.
-                        error_element = await page.select(".alert-msg-summary p", timeout=2)
+                        error_element = await page.select(".alert-msg-summary p", timeout=10)
                         error_text = error_element.text_all.strip().replace("\n", " ")
                         full_error_message = f"Wells Fargo HARD Error for {stock_symbol}: {error_text}"
                         printAndDiscord(full_error_message, discord_loop)
@@ -851,8 +866,9 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                         await confirm_button.mouse_click()
                         printAndDiscord(f"Successfully placed order for {action} {quantity} of {stock_symbol}.", discord_loop)
                         log("Final order placed successfully.")
-                        await page.wait_for_ready_state("complete")
+                        await page.wait_for_ready_state("complete", timeout=20)
                         await page.wait()
+                        await page.sleep(0.25)
                     except Exception as e:
                         # This catch is for potential errors during the final click itself
                         raise Exception(f"An error occurred while clicking the final 'SUBMIT ORDER' button: {e}")
@@ -905,8 +921,7 @@ async def wellsfargo_holdings(wf_brokerage_obj: Brokerage, account_name_key: str
                 
                 log(f"Navigating to holdings URL: {holdings_url}")
                 await page.get(holdings_url)
-                await page.wait_for_ready_state("complete")
-                await page.wait()
+                await asyncio.sleep(5)
                 
                 await extract_holdings_from_table(page, wf_brokerage_obj, account_name_key, account_id, discord_loop)
                 
