@@ -279,9 +279,10 @@ async def fidelity_login(page, account_cred_str, name, botObj, discord_loop):
             
             if "ftgw/digital/portfolio/summary" in curr_url and "login" not in curr_url:
                 log("Redirected to summary. Login Complete.")
+                await page.sleep(0.25)
                 await page.wait_for_ready_state("complete")
                 await page.wait()
-                await page.sleep(2)
+                await page.sleep(0.25)
                 return True
             
             # Check for various 2FA indicators
@@ -320,7 +321,10 @@ async def fidelity_login(page, account_cred_str, name, botObj, discord_loop):
                 else:
                     return False
             
-            await asyncio.sleep(1)
+            await page.sleep(0.25)
+            await page.wait_for_ready_state("complete", timeout=10)
+            await page.wait()
+            await page.sleep(0.25)
             
         log("Login timed out or failed to redirect.")
         return False
@@ -332,7 +336,10 @@ async def fidelity_login(page, account_cred_str, name, botObj, discord_loop):
 async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
     try:
         # Give a moment for the 2FA UI to fully stabilize
-        await page.sleep(2)
+        await page.sleep(0.25)
+        await page.wait_for_ready_state("complete", timeout=10)
+        await page.wait()
+        await page.sleep(0.25)
         
         # -----------------------------------------------------
         # CASE 1: In-App Push Notification
@@ -357,7 +364,10 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
                 })();
             """)
 
-            await page.sleep(1)
+            await page.sleep(0.25)
+            await page.wait_for_ready_state("complete", timeout=10)
+            await page.wait()
+            await page.sleep(0.25)
             
             # 2. Click 'Send notification' button
             send_btn = await page.select("#dom-push-primary-button", timeout=2)
@@ -402,9 +412,13 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
             text_btn = await page.select("#dom-channel-list-primary-button", timeout=2)
             if text_btn:
                 log("Clicking 'Text me the code'...")
-                await text_btn.click()
+                await text_btn.mouse_move()
+                await text_btn.mouse_click()
                 # Wait for the input screen to load
-                await page.sleep(2)
+                await page.sleep(0.25)
+                await page.wait_for_ready_state("complete", timeout=10)
+                await page.wait()
+                await page.sleep(0.25)
             else:
                 log("Text button not found, checking secondary options...")
                 # Could try to find secondary button if primary isn't text, but primary is usually text
@@ -446,12 +460,13 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
                         }
                     })();
                 """)
-                await page.sleep(0.5)
+                await page.sleep(0.25)
 
                 # Click Submit
                 submit_btn = await page.select("#dom-otp-code-submit-button", timeout=2)
                 if submit_btn:
-                    await submit_btn.click()
+                    await submit_btn.mouse_move()
+                    await submit_btn.mouse_click()
                     await page.sleep(5)
                     
                     # Wait for redirect
@@ -459,7 +474,10 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
                         curr_url = await get_current_url(page)
                         if "ftgw/digital/portfolio/summary" in curr_url and "login" not in curr_url:
                             return True
-                        await page.sleep(1)
+                        await page.sleep(0.25)
+                        await page.wait_for_ready_state("complete", timeout=10)
+                        await page.wait()
+                        await page.sleep(0.25)
             
             return False
 
@@ -495,7 +513,8 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
                      code = await asyncio.get_event_loop().run_in_executor(None, input, f"Enter Fidelity TOTP for {name}: ")
             
             if code:
-                await auth_input.click()
+                await auth_input.mouse_move()
+                await auth_input.mouse_click()
                 await auth_input.send_keys(code)
                 
                 # Trust Device
@@ -507,13 +526,14 @@ async def handle_2fa(page, botObj, discord_loop, totp_secret, name):
                         }
                     })();
                 """)
-                await page.sleep(0.5)
+                await page.sleep(0.25)
 
                 # Submit (Try specific ID first, fallback to generic logic if ID changed)
                 # The old script used 'dom-totp-code-continue-button', assuming it's still valid or similar
                 continue_btn = await page.select("#dom-totp-code-continue-button", timeout=5)
                 if continue_btn:
-                    await continue_btn.click()
+                    await continue_btn.mouse_move()
+                    await continue_btn.mouse_click()
                     await page.sleep(5)
                 
                 # Wait for redirect
@@ -553,16 +573,17 @@ async def fetch_accounts(page, brokerage_obj, name, loop):
         dropdown_selector = "#dest-acct-dropdown"
         
         # Wait for dropdown
+        await page.sleep(0.25)
         await page.wait_for_ready_state("complete", timeout=10)
         await page.wait()
-        await page.sleep(2)
+        await page.sleep(0.25)
 
         found_dd = False
         for _ in range(20):
             if await page.evaluate(f'document.querySelector("{dropdown_selector}") !== null'):
                 found_dd = True
                 break
-            await page.sleep(0.5)
+            await page.sleep(0.25)
         
         if found_dd:
             # Open dropdown to load list
@@ -620,9 +641,10 @@ async def fetch_holdings(page, brokerage_obj, name, loop):
         
         if "positions" not in await get_current_url(page):
             await page.get(POSITIONS_URL)
+            await page.sleep(0.25)
             await page.wait_for_ready_state("complete")
             await page.wait()
-            await page.sleep(2)
+            await page.sleep(0.25)
             
         await page.evaluate("""
             (function() {
@@ -792,9 +814,10 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
             
             try:
                 await page.get(TRADE_URL)
+                await page.sleep(0.5)
                 await page.wait_for_ready_state("complete", timeout=10)
                 await page.wait()
-                await page.sleep(2)
+                await page.sleep(0.25)
                 
                 dropdown_selector = "#dest-acct-dropdown"
                 for _ in range(20):
@@ -826,53 +849,58 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 if result != "Clicked":
                     log(f"Failed to select account {acct_num}. Skipping.")
                     continue
-                await page.sleep(2)
+                await page.sleep(0.25)
 
                 # ---------------------------------------------------------
-                # EXTENDED HOURS LOGIC (Moved to before symbol for correct pricing)
+                # EXTENDED HOURS LOGIC (Updated: Toggle Priority + Time Fallback)
                 # ---------------------------------------------------------
                 et_tz = pytz.timezone('US/Eastern')
                 now_et = datetime.datetime.now(et_tz)
                 current_time = now_et.time()
-                
-                # Fidelity Extended Hours: 
-                # Pre-Market: 7:00 AM - 9:28 AM ET
-                # After-Hours: 4:00 PM - 8:00 PM ET
                 is_extended_time = False
-                if (datetime.time(7, 0) <= current_time <= datetime.time(9, 28)) or \
-                   (datetime.time(16, 0) <= current_time <= datetime.time(20, 0)):
-                    is_extended_time = True
-                
-                if is_extended_time:
-                    log("Current time is within Fidelity Extended Hours window.")
-                    
-                    # 1. Toggle Extended Hours ON
-                    try:
-                        # Check the 'aria-checked' attribute to see if it's already ON
-                        # The ID you provided is 'eq-ticket_extendedhour'
-                        needs_toggle = await page.evaluate("""
-                            (function() {
-                                const btn = document.getElementById('eq-ticket_extendedhour');
-                                if (btn) {
-                                    // If aria-checked is NOT "true", we need to click it
-                                    return btn.getAttribute('aria-checked') !== 'true';
-                                }
-                                return false; // Button not found
-                            })();
-                        """)
-                        
-                        if needs_toggle:
-                            log("Extended Hours switch is OFF. Toggling ON...")
-                            toggle_btn = await page.select("#eq-ticket_extendedhour")
-                            if toggle_btn:
-                                await toggle_btn.click()
-                                await page.sleep(0.5)
-                        else:
-                            log("Extended Hours switch is already ON or not found.")
-                            
-                    except Exception as e:
-                        log(f"Error handling extended hours toggle: {e}")
 
+                toggle_row = await page.select('.eq-ticket__extended-hrs-toggle-row_dest')  
+                switch_root = await page.select('.eq-ticket__extendedhour-toggle')  
+                toggle_element_exists = toggle_row is not None or switch_root is not None  
+  
+                if toggle_element_exists:  
+                    log("Extended Hours Toggle Element DETECTED. Forcing Extended Hours Mode.")  
+                    is_extended_time = True  
+      
+                # 2. Check if toggle is ON using element properties  
+                is_toggled_on = False  
+                if switch_root:  
+                    # Check if element has the 'pvd-switch--on' class  
+                    is_toggled_on = 'pvd-switch--on' in switch_root.attrs.get('class', '')  
+      
+                if not is_toggled_on:  
+                    # Fallback: check aria-checked attribute on button  
+                    toggle_btn = await page.select("#eq-ticket_extendedhour", timeout=5)  
+                    if toggle_btn and toggle_btn.attrs.get('aria-checked') == 'true':  
+                        is_toggled_on = True  
+      
+                if is_toggled_on:  
+                    log("Extended Hours Switch is already ON.")  
+                else:  
+                    log("Extended Hours Switch is OFF. Clicking to Enable...")  
+                    try:  
+                        # Try clicking the button ID first  
+                        toggle_btn = await page.select("#eq-ticket_extendedhour", timeout=5)  
+                        if toggle_btn is not None:  
+                            await toggle_btn.mouse_move()
+                            await toggle_btn.mouse_click()  
+                        else:  
+                            # Fallback to clicking the switch wrapper  
+                            switch_wrapper = await page.select('.eq-ticket__extendedhour-toggle', timeout=5)  
+                            if switch_wrapper is not None:  
+                                await switch_wrapper.mouse_move()
+                                await switch_wrapper.mouse_click()
+                        await page.sleep(0.25)
+                        await page.wait_for_ready_state("complete", timeout=10)
+                        await page.wait()
+                        await page.sleep(0.25)
+                    except Exception as e:  
+                        log(f"Error toggling Extended Hours switch: {e}")
 
                 current_price = 0.0
                 
@@ -886,9 +914,10 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                     await symbol_input.send_keys(SpecialKeys.ENTER)
                 
                 log("Waiting for price data via DOM parsing...")
-                await page.wait_for_ready_state("complete")
+                await page.sleep(0.25)
+                await page.wait_for_ready_state("complete", timeout=10)
                 await page.wait()
-                await page.sleep(2)
+                await page.sleep(0.25)
                 
                 # Parse DOM for Price (Last, Bid, Ask)
                 price_data = await page.evaluate("""
@@ -943,7 +972,6 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 else:
                     current_price = last_price
                 
-                # [EXISTING CODE] ...
                 log(f"Selected Reference Price for {action_upper}: {current_price}")
                 printAndDiscord(f"{name}: Current price for {symbol} is ${current_price}", loop)
 
@@ -972,9 +1000,10 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                             await expand_btn.mouse_click()
                             
                             # Wait for the UI to refresh/expand
+                            await page.sleep(0.25)
                             await page.wait_for_ready_state("complete")
-                            await page.wait
-                            await page.sleep(0.5)
+                            await page.wait()
+                            await page.sleep(0.25)
                         else:
                             log("Warning: 'View expanded ticket' button not found. Layout might differ or already strictly enforced.")
 
@@ -986,19 +1015,22 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
           
                 # 1. Open the dropdown
                 action_dropdown = await page.select("#dest-dropdownlist-button-action")
-                await action_dropdown.click()
-                await page.sleep(0.5)
+                await action_dropdown.mouse_move()
+                await action_dropdown.mouse_click()
+                await page.sleep(0.25)
                 
                 # 2. Robust Selection via JavaScript
                 # Fidelity uses specific IDs: #Action0 = Buy, #Action1 = Sell
                 if action_upper == "BUY":  
                     buy_option = await page.select("#Action0")  
+                    await buy_option.mouse_move()
                     await buy_option.mouse_click()  
-                    await page.sleep(0.5)
+                    await page.sleep(0.25)
                 elif action_upper == "SELL":  
                     sell_option = await page.select("#Action1")  
+                    await sell_option.mouse_move()
                     await sell_option.mouse_click()
-                    await page.sleep(0.5)
+                    await page.sleep(0.25)
                 
 
                 log(f"Entering Quantity: {quantity_val}")
@@ -1006,7 +1038,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 if qty_input:
                     await qty_input.clear_input()
                     await qty_input.send_keys(str(quantity_val))
-                    await page.sleep(0.5)
+                    await page.sleep(0.25)
 
                 order_type_to_use = "Market"
                 limit_price_to_use = None
@@ -1052,8 +1084,9 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
 
                 # 1. Open the Order Type Dropdown
                 type_dropdown = await page.select("#dest-dropdownlist-button-ordertype")
-                await type_dropdown.click()
-                await page.sleep(0.5)
+                await type_dropdown.mouse_move()
+                await type_dropdown.mouse_click()
+                await page.sleep(0.25)
 
                 # 2. Select the specific option using mouse_click
                 # Mapping based on IDs: #Order-type0=Market, #Order-type1=Limit, #Order-type3=Stop Loss, #Order-type4=Stop Limit
@@ -1102,7 +1135,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                         limit_price_to_use = current_price
                     await limit_input.send_keys(str(limit_price_to_use))
                     await page.mouse_click(0,0)
-                    await page.sleep(0.5)
+                    await page.sleep(0.25)
 
                 log("Previewing Order...")
                 
@@ -1110,13 +1143,12 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 preview = await page.select("#previewOrderBtn", timeout=10)
                 await preview.mouse_move()
                 await preview.mouse_click()
-                await page.sleep(0.25)
-
                 
                 # Wait for potential error modal or success state
+                await page.sleep(0.25)
                 await page.wait_for_ready_state("complete", timeout=10)
                 await page.wait()
-                await page.sleep(2)
+                await page.sleep(0.25)
                 
                 # Check for "Place Order" button first (Success Indicator)
                 place_order_btn = None
