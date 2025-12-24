@@ -943,11 +943,47 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 else:
                     current_price = last_price
                 
+                # [EXISTING CODE] ...
                 log(f"Selected Reference Price for {action_upper}: {current_price}")
                 printAndDiscord(f"{name}: Current price for {symbol} is ${current_price}", loop)
 
-                log(f"Selecting Action: {action_upper}")
+                # ---------------------------------------------------------
+                # NEW: ENSURE EXPANDED TICKET MODE
+                # ---------------------------------------------------------
+                log("Verifying Ticket Mode (Expanded vs Simplified)...")
                 
+                try:
+                    # Check if 'View simplified ticket' button is present
+                    # If present, it means we are CURRENTLY in Expanded Mode (Desired State)
+                    is_expanded_mode = await page.select("#show-fewer-trade-selections", timeout=1)
+
+                    if is_expanded_mode:
+                        log("Expanded ticket mode detected (Active). Proceeding.")
+                    else:
+                        log("Expanded ticket mode NOT detected. Looking for 'View expanded ticket' button...")
+                        
+                        # Check for the 'View expanded ticket' button
+                        expand_btn = await page.select("#show-more-trade-selections", timeout=5)
+                        
+                        if expand_btn:
+                            log("Found 'View expanded ticket' button. Clicking to switch modes...")
+                            await expand_btn.scroll_into_view()
+                            await expand_btn.mouse_move()
+                            await expand_btn.mouse_click()
+                            
+                            # Wait for the UI to refresh/expand
+                            await page.wait_for_ready_state("complete")
+                            await page.wait
+                            await page.sleep(0.5)
+                        else:
+                            log("Warning: 'View expanded ticket' button not found. Layout might differ or already strictly enforced.")
+
+                except Exception as e:
+                    log(f"Error ensuring Expanded Ticket Mode: {e}")
+                # ---------------------------------------------------------
+
+                log(f"Selecting Action: {action_upper}")
+          
                 # 1. Open the dropdown
                 action_dropdown = await page.select("#dest-dropdownlist-button-action")
                 await action_dropdown.click()
