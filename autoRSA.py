@@ -80,6 +80,12 @@ EXTENDED_HOURS = [
     "vanguard",
     "fidelity",
 ]
+OTC_BROKERS = [
+    "fidelity",
+    "wellsfargo",
+    "bbae",
+    "dspac",
+]
 DISCORD_BOT = False
 DOCKER_MODE = False
 DANGER_MODE = False
@@ -95,7 +101,7 @@ def nicknames(broker):
         return "fidelity"
     if broker == "ft":
         return "firstrade"
-    if broker == "rh":
+    if broker in ["rh", "robin"]:
         return "robinhood"
     if broker == "tasty":
         return "tastytrade"
@@ -103,7 +109,7 @@ def nicknames(broker):
         return "vanguard"
     if broker == "wb":
         return "webull"
-    if broker == "wf":
+    if broker in ["wf", "wells"]:
         return "wellsfargo"
     return broker
 
@@ -244,6 +250,8 @@ def argParser(args: list) -> stockOrder:
             orderObj.set_brokers(SUPPORTED_BROKERS)
         elif args[1] == "extended":
             orderObj.set_brokers(EXTENDED_HOURS)
+        elif args[1] == "otc":
+            orderObj.set_brokers(OTC_BROKERS)
         else:
             for broker in args[1].split(","):
                 orderObj.set_brokers(nicknames(broker))
@@ -264,6 +272,8 @@ def argParser(args: list) -> stockOrder:
         orderObj.set_brokers(SUPPORTED_BROKERS)
     elif args[3] == "extended":
         orderObj.set_brokers(EXTENDED_HOURS)
+    elif args[3] == "otc":
+        orderObj.set_brokers(OTC_BROKERS)
     else:
         for broker in args[3].split(","):
             if nicknames(broker) in SUPPORTED_BROKERS:
@@ -416,6 +426,7 @@ if __name__ == "__main__":
                 "__**Target Keywords**__\n"
                 "• `all`: Includes ALL supported brokers.\n"
                 "• `extended`: Includes brokers with extended hours support (Fidelity, Public, SoFi, Vanguard).\n"
+                "• `otc`: Includes brokers with OTC support (Fidelity, WellsFargo, BBAE, DSPAC).\n"
                 "• **Specific List**: Comma-separated names (e.g. `chase,wellsfargo`).\n\n"
                 
                 "__**Other**__\n"
