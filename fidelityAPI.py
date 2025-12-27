@@ -859,48 +859,73 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 current_time = now_et.time()
                 is_extended_time = False
 
-                toggle_row = await page.select('.eq-ticket__extended-hrs-toggle-row_dest')  
-                switch_root = await page.select('.eq-ticket__extendedhour-toggle')  
-                toggle_element_exists = toggle_row is not None or switch_root is not None  
+                toggle_row = None
+                switch_root = None
+                try:
+                    toggle_row = await page.select('.eq-ticket__extended-hrs-toggle-row_dest', timeout=3)
+                except:
+                    pass
+                
+                try:
+                    switch_root = await page.select('.eq-ticket__extendedhour-toggle', timeout=2)
+                except:
+                    pass
+
+                toggle_element_exists = toggle_row is not None or switch_root is not None
   
                 if toggle_element_exists:  
                     log("Extended Hours Toggle Element DETECTED. Forcing Extended Hours Mode.")  
                     is_extended_time = True  
       
-                # 2. Check if toggle is ON using element properties  
-                is_toggled_on = False  
-                if switch_root:  
-                    # Check if element has the 'pvd-switch--on' class  
-                    is_toggled_on = 'pvd-switch--on' in switch_root.attrs.get('class', '')  
+                    # 2. Check if toggle is ON using element properties  
+                    is_toggled_on = False  
+                    if switch_root:  
+                        # Check if element has the 'pvd-switch--on' class  
+                        is_toggled_on = 'pvd-switch--on' in switch_root.attrs.get('class', '')  
       
-                if not is_toggled_on:  
-                    # Fallback: check aria-checked attribute on button  
-                    toggle_btn = await page.select("#eq-ticket_extendedhour", timeout=5)  
-                    if toggle_btn and toggle_btn.attrs.get('aria-checked') == 'true':  
-                        is_toggled_on = True  
+                    if not is_toggled_on:  
+                        # Fallback: check aria-checked attribute on button 
+                        try: 
+                            toggle_btn = await page.select("#eq-ticket_extendedhour", timeout=2)  
+                            if toggle_btn and toggle_btn.attrs.get('aria-checked') == 'true':  
+                                is_toggled_on = True
+                        except:
+                            pass
       
-                if is_toggled_on:  
-                    log("Extended Hours Switch is already ON.")  
-                else:  
-                    log("Extended Hours Switch is OFF. Clicking to Enable...")  
-                    try:  
-                        # Try clicking the button ID first  
-                        toggle_btn = await page.select("#eq-ticket_extendedhour", timeout=5)  
-                        if toggle_btn is not None:  
-                            await toggle_btn.mouse_move()
-                            await toggle_btn.mouse_click()  
-                        else:  
-                            # Fallback to clicking the switch wrapper  
-                            switch_wrapper = await page.select('.eq-ticket__extendedhour-toggle', timeout=5)  
-                            if switch_wrapper is not None:  
-                                await switch_wrapper.mouse_move()
-                                await switch_wrapper.mouse_click()
-                        await page.sleep(0.25)
-                        await page.wait_for_ready_state("complete", timeout=10)
-                        await page.wait()
-                        await page.sleep(0.25)
-                    except Exception as e:  
-                        log(f"Error toggling Extended Hours switch: {e}")
+                    if is_toggled_on:  
+                        log("Extended Hours Switch is already ON.")  
+                    else:  
+                        log("Extended Hours Switch is OFF. Clicking to Enable...")  
+                        try:  
+                            # Try clicking the button ID first 
+                            btn_clicked = False 
+                            try:
+                                toggle_btn = await page.select("#eq-ticket_extendedhour", timeout=2)  
+                                if toggle_btn is not None:  
+                                    await toggle_btn.mouse_move()
+                                    await toggle_btn.mouse_click()
+                                    btn_clicked = True
+                            except:
+                                pass
+
+                            if not btn_clicked:  
+                                # Fallback to clicking the switch wrapper  
+                                try:
+                                    switch_wrapper = await page.select('.eq-ticket__extendedhour-toggle', timeout=2)  
+                                    if switch_wrapper is not None:  
+                                        await switch_wrapper.mouse_move()
+                                        await switch_wrapper.mouse_click()
+                                except:
+                                    pass
+
+                            await page.sleep(0.25)
+                            await page.wait_for_ready_state("complete", timeout=10)
+                            await page.wait()
+                            await page.sleep(0.25)
+                        except Exception as e:  
+                            log(f"Error toggling Extended Hours switch: {e}")
+                else:
+                    log("Extended Hours Toggle Element NOT DETECTED. Proceeding with Normal Order logic.")
 
                 current_price = 0.0
                 
