@@ -1219,12 +1219,55 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                     
                     place_order_btn = await page.select("#placeOrderBtn", timeout=10)
                     
-                    try:
-                        await place_order_btn.mouse_move()
-                        await place_order_btn.mouse_click()
-                        await page.sleep(0.25)
-                    except Exception as e:
-                        log(f"Place order capture failed: {e}")
+                    if place_order_btn:
+                        try:
+                            await place_order_btn.mouse_move()
+                            await place_order_btn.mouse_click()
+                            
+                            # Wait for confirmation
+                            log("Order placed. Waiting for confirmation...")
+                            confirmation_success = False
+                            
+                            # Wait up to 10 seconds for confirmation indicators
+                            for _ in range(20):
+                                await page.sleep(0.5)
+                                
+                                # Check for "Order Received" header/text or verified success indicators
+                                success_check = await page.evaluate("""
+                                    (function() {
+                                        const bodyText = document.body.innerText;
+                                        if (bodyText.includes('Order Received') || bodyText.includes('Confirmation')) return true;
+                                        if (document.querySelector('.pvd-inline-alert__content--success')) return true;
+                                        return false;
+                                    })();
+                                """)
+                                
+                                if success_check:
+                                    confirmation_success = True
+                                    break
+                                
+                                # Check if we got redirected to Confirmation page (URL change)
+                                curr_url = await page.evaluate("window.location.href")
+                                if "confirmation" in curr_url.lower():
+                                    confirmation_success = True
+                                    break
+
+                            if confirmation_success:
+                                msg = f"{name}: SUCCESS - Order for {quantity_val} {symbol} placed successfully in {acct_name} ({acct_num})"
+                                log(msg)
+                                printAndDiscord(msg, loop)
+                            else:
+                                msg = f"{name}: WARNING - Order button clicked but confirmation not detected for {symbol} in {acct_name} ({acct_num}). Please verify manually."
+                                log(msg)
+                                printAndDiscord(msg, loop)
+
+                        except Exception as e:
+                            log(f"Place order interactions failed: {e}")
+                            printAndDiscord(f"{name}: FAILED to place order for {symbol} in {acct_name} ({acct_num}). Error: {e}", loop)
+                    else:
+                        msg = f"{name}: ERROR - Place Order button not found for {symbol} in {acct_name}"
+                        log(msg)
+                        printAndDiscord(msg, loop)
 
             except Exception as e:
                 log(f"Exception processing account {acct_num}: {e}")
