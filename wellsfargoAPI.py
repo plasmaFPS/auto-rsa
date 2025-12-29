@@ -607,11 +607,13 @@ async def _select_dropdown_option(page, dropdown_opener_selector, option_value, 
     try:
         log(f"Clicking dropdown '{dropdown_opener_selector}' and selecting '{option_value}'.")
         opener = await page.select(dropdown_opener_selector, timeout=timeout)
+        await opener.scroll_into_view()
         await opener.mouse_click()
         
         # All usages follow the a[data-val='...'] pattern
         option_selector = f"a[data-val='{option_value}']"
         option = await page.select(option_selector, timeout=timeout)
+        await option.scroll_into_view()
         await option.mouse_click()
         
     except asyncio.TimeoutError:
