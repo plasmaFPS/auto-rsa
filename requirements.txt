@@ -17,7 +17,7 @@ requests==2.32.5
 # robin-stocks==3.4.0
 -e git+https://github.com/ImNotOssy/robin_stocks.git@be1348497d1c1668434ac032ce2361dffda4e687#egg=robin_stocks
 # schwab-api==0.4.3
--e git+https://github.com/yanowitz/schwab-api.git@3437fbc4d6e70d941202b74e801139161118e69a#egg=schwab-api
+-e git+https://github.com/ImNotOssy/schwab-api.git@81bb4fd93c0661c60ef4504ec0223385b51b8e17#egg=schwab-api
 selenium-stealth==1.0.6
 setuptools==80.9.0
 tastytrade==11.0.2

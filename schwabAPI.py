@@ -11,6 +11,16 @@ from schwab_api import Schwab #type: ignore
 from helperAPI import Brokerage, maskString, printAndDiscord, printHoldings, stockOrder
 
 
+load_dotenv()
+DEBUG = os.getenv("SCHWAB_DEBUG", "false").lower() == "true"
+
+def log_debug(message):
+    """Prints a message to the console only if DEBUG is True in .env."""
+    if DEBUG:
+        print(f"[DEBUG] {message}")
+
+
+
 def schwab_init(SCHWAB_EXTERNAL=None):
     # Initialize .env file
     load_dotenv()
@@ -31,7 +41,7 @@ def schwab_init(SCHWAB_EXTERNAL=None):
         name = f"Schwab {index}"
         try:
             account = account.split(":")
-            schwab = Schwab(session_cache=f"./creds/schwab{index}.json")
+            schwab = Schwab(session_cache=f"./creds/schwab{index}.json", debug=DEBUG)
             schwab.login(
                 username=account[0],
                 password=account[1],
@@ -112,6 +122,7 @@ def schwab_transaction(schwab_o: Brokerage, orderObj: stockOrder, loop=None):
                         "Running in DRY mode. No transactions will be made.", loop
                     )
                 try:
+                    log_debug(f"Calling trade_v2 for {s} in {print_account}...")
                     messages, success = obj.trade_v2(
                         ticker=s,
                         side=orderObj.get_action().capitalize(),
@@ -119,6 +130,7 @@ def schwab_transaction(schwab_o: Brokerage, orderObj: stockOrder, loop=None):
                         account_id=account,
                         dry_run=orderObj.get_dry(),
                     )
+                    log_debug(f"trade_v2 returned: success={success}, messages={messages}")
 
                     # Define known error messages
                     error_messages = {
@@ -129,6 +141,7 @@ def schwab_transaction(schwab_o: Brokerage, orderObj: stockOrder, loop=None):
 
                     handled = False
                     if not success:
+                        log_debug(f"trade_v2 failure messages: {messages}")
                         for error, friendly_message in error_messages.items():
                             if any(error in str(msg) for msg in messages):
                                 printAndDiscord(
@@ -152,6 +165,7 @@ def schwab_transaction(schwab_o: Brokerage, orderObj: stockOrder, loop=None):
                     )
 
                     if not success:
+                        log_debug(f"Calling legacy trade for {s} in {print_account}...")
                         messages, success = obj.trade(
                             ticker=s,
                             side=orderObj.get_action().capitalize(),
@@ -159,6 +173,8 @@ def schwab_transaction(schwab_o: Brokerage, orderObj: stockOrder, loop=None):
                             account_id=account,
                             dry_run=orderObj.get_dry(),
                         )
+                        log_debug(f"legacy trade returned: success={success}, messages={messages}")
+                        
                         printAndDiscord(
                             (
                                 f"{key} account {print_account}: The order verification was "
