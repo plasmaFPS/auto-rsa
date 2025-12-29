@@ -527,7 +527,8 @@ async def fetch_initial_account_data(page: uc.Tab, wf_brokerage_obj: Brokerage, 
     try:
         await page.wait_for_ready_state("complete")
         await page.wait()
-        await page.sleep(1)
+        await page.sleep(2)
+        await page.select("#account-summary", timeout=10)
         current_url = await get_current_url(page, discord_loop)
         
         x_param_match = re.search(r'_x=([^&]+)', current_url)
@@ -921,7 +922,9 @@ async def wellsfargo_holdings(wf_brokerage_obj: Brokerage, account_name_key: str
                 
                 log(f"Navigating to holdings URL: {holdings_url}")
                 await page.get(holdings_url)
-                await asyncio.sleep(5)
+                await page.wait_for_ready_state("complete")
+                await page.wait()
+                await page.find("row m-0")
                 
                 await extract_holdings_from_table(page, wf_brokerage_obj, account_name_key, account_id, discord_loop)
                 
