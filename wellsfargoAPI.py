@@ -606,6 +606,8 @@ async def _select_dropdown_option(page, dropdown_opener_selector, option_value, 
     """
     try:
         log(f"Clicking dropdown '{dropdown_opener_selector}' and selecting '{option_value}'.")
+        await page.wait_for_ready_state("complete")
+        await page.wait()
         opener = await page.select(dropdown_opener_selector, timeout=timeout)
         await opener.scroll_into_view()
         await opener.mouse_click()
@@ -707,9 +709,7 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     await symbol_input.send_keys(SpecialKeys.TAB)
 
                     log("Waiting for quote to load...")
-                    await page.wait_for_ready_state("complete")
-                    await page.wait()
-                    await page.sleep(1)
+                    await page.select("#prevdata", timeout=5)
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find symbol input field.")
 
@@ -786,14 +786,12 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     payloads = KeyEvents.from_text(str(int(quantity)), KeyPressEvent.DOWN_AND_UP)  
                     await quantity_input.send_keys(payloads)
                     await quantity_input.send_keys(SpecialKeys.TAB)
-                    await page.wait_for_ready_state("complete", timeout=20)
-                    await page.wait()
-                    await page.sleep(1)
 
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find the Quantity input field '#OrderQuantity'.")
                 
                 # 5. Select Order Type
+                await page.select("#OrderTypeBtn", timeout=10)
                 await _select_dropdown_option(page, "#OrderTypeBtn", order_type)
 
                 # 6. Enter Limit Price
