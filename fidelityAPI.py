@@ -279,10 +279,7 @@ async def fidelity_login(page, account_cred_str, name, botObj, discord_loop):
             
             if "ftgw/digital/portfolio/summary" in curr_url and "login" not in curr_url:
                 log("Redirected to summary. Login Complete.")
-                await page.sleep(0.25)
-                await page.wait_for_ready_state("complete")
-                await page.wait()
-                await page.sleep(0.25)
+                await page.select("#accountDetails", timeout=10)
                 return True
             
             # Check for various 2FA indicators
@@ -814,10 +811,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
             
             try:
                 await page.get(TRADE_URL)
-                await page.sleep(0.5)
-                await page.wait_for_ready_state("complete", timeout=10)
-                await page.wait()
-                await page.sleep(0.25)
+                await page.select("#previewOrderBtn", timeout=10)
                 
                 dropdown_selector = "#dest-acct-dropdown"
                 for _ in range(20):
@@ -825,7 +819,6 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                         if await page.evaluate(f'document.querySelector("{dropdown_selector}") !== null'):
                             break
                     except: pass
-                    await page.sleep(0.5)
 
                 log(f"Selecting Account: {acct_num}")
                 await page.evaluate(f'document.querySelector("{dropdown_selector}").click()')
@@ -849,7 +842,6 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 if result != "Clicked":
                     log(f"Failed to select account {acct_num}. Skipping.")
                     continue
-                await page.sleep(0.25)
 
                 # ---------------------------------------------------------
                 # EXTENDED HOURS LOGIC (Updated: Toggle Priority + Time Fallback)
@@ -862,23 +854,19 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 toggle_row = None
                 switch_root = None
                 try:
-                    toggle_row = await page.select('.eq-ticket__extended-hrs-toggle-row_dest', timeout=3)
-                except:
-                    pass
-                
-                try:
-                    switch_root = await page.select('.eq-ticket__extendedhour-toggle', timeout=2)
+                    toggle_row = await page.select('.eq-ticket__extended-hrs-toggle-row_dest', timeout=1)
                 except:
                     pass
 
-                toggle_element_exists = toggle_row is not None or switch_root is not None
+                toggle_element_exists = toggle_row is not None
   
                 if toggle_element_exists:  
                     log("Extended Hours Toggle Element DETECTED. Forcing Extended Hours Mode.")  
                     is_extended_time = True  
       
                     # 2. Check if toggle is ON using element properties  
-                    is_toggled_on = False  
+                    is_toggled_on = False
+                    switch_root = await page.select('.eq-ticket__extendedhour-toggle', timeout=5)  
                     if switch_root:  
                         # Check if element has the 'pvd-switch--on' class  
                         is_toggled_on = 'pvd-switch--on' in switch_root.attrs.get('class', '')  

@@ -177,7 +177,6 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
             elif headless:
                 browser_args.extend(["--headless=new", "--window-size=1920,1080", 
                 "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
-                "--disable-blink-features=AutomationControlled",
                 "--disable-site-isolation-trials",
                 "--disable-features=IsolateOrigins,site-per-process",
                 "--disable-session-crashed-bubble",
@@ -194,7 +193,6 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
                     "--start-maximized",  
                     "--disable-session-crashed-bubble",
                     "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
-                    "--disable-blink-features=AutomationControlled",  
                     "--disable-infobars",  
                     "--disable-features=TranslateUI,VizDisplayCompositor",
                     "--no-first-run",  
@@ -263,7 +261,9 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
 
 async def chase_login_ui(page, username, password, last_four, name, botObj, discord_loop):
     log(f"Logging in via UI for {name}...")
-    await page.sleep(3)
+    await page.wait_for_ready_state("complete")
+    await page.wait()
+    await page.sleep(2)
 
     if "dashboard" in page.url:
         log("Already logged in.")
@@ -279,8 +279,10 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
             await user_box.send_keys(username)
             await pass_box.send_keys(password)
             btn = await safe_find(page, "#signin-button", timeout=5)
-            if btn: await btn.click()
-            await page.sleep(5)
+            if btn: await btn.mouse_click()
+            await page.wait_for_ready_state("complete")
+            await page.wait()
+            await page.sleep(4)
     except Exception as e:
         log(f"Cred entry error (ignorable if logged in): {e}")
 
@@ -359,7 +361,9 @@ async def chase_login_ui(page, username, password, last_four, name, botObj, disc
                 await page.sleep(5)
             continue
         
-        await page.sleep(1)
+        await page.wait_for_ready_state("complete")
+        await page.wait()
+        await page.sleep(0.5)
 
     return "dashboard" in page.url
 
