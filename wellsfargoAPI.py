@@ -806,6 +806,8 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                         raise Exception("Failed to find Limit Price input field.")
                 
                 # 7. Select Timing
+                time_of_day =   await page.select("#TIFBtn", timeout=10)
+                await time_of_day.scroll_into_view()
                 await _select_dropdown_option(page, "#TIFBtn", "Day")
 
                 # 8. Preview Order
