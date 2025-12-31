@@ -755,6 +755,31 @@ async def fetch_holdings(page, brokerage_obj, name, loop):
         printAndDiscord(f"{name} Holdings Error: {e}", loop)
         traceback.print_exc()
 
+
+async def _select_dropdown_option(page, dropdown_opener_selector, option_value, timeout=10):
+    """
+    Helper to select an option from a custom dropdown.
+    """
+    try:
+        log(f"Clicking dropdown '{dropdown_opener_selector}' and selecting '{option_value}'.")
+        await page.wait_for_ready_state("complete")
+        
+        # 1. Open the dropdown
+        opener = await page.select(dropdown_opener_selector, timeout=timeout)
+        await opener.scroll_into_view()
+        await opener.mouse_click()
+        
+        await page.select("#ett-acct-sel-list", timeout=timeout)
+
+        option = await page.find(option_value, best_match=True)
+        await option.scroll_into_view()
+        await option.mouse_click()
+        
+    except Exception as e:
+        print(f"Error selecting option: {e}")
+        raise Exception(f"Failed to select '{option_value}' from dropdown '{dropdown_opener_selector}'.")
+
+
 async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
     log("Starting transaction loop...")
     
@@ -814,34 +839,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 await page.select("#previewOrderBtn", timeout=10)
                 
                 dropdown_selector = "#dest-acct-dropdown"
-                for _ in range(20):
-                    try:
-                        if await page.evaluate(f'document.querySelector("{dropdown_selector}") !== null'):
-                            break
-                    except: pass
-
-                log(f"Selecting Account: {acct_num}")
-                await page.evaluate(f'document.querySelector("{dropdown_selector}").click()')
-                
-                js_select_account = f"""
-                (function() {{
-                    const list = document.getElementById("ett-acct-sel-list");
-                    if (!list) return "List not found";
-                    
-                    const buttons = list.querySelectorAll('div[role="option"] button');
-                    for (let btn of buttons) {{
-                        if (btn.innerText.includes("{acct_num}")) {{
-                            btn.click();
-                            return "Clicked";
-                        }}
-                    }}
-                    return "Account not found in list";
-                }})();
-                """
-                result = await page.evaluate(js_select_account)
-                if result != "Clicked":
-                    log(f"Failed to select account {acct_num}. Skipping.")
-                    continue
+                await _select_dropdown_option(page, dropdown_selector, acct_num)
 
                 # ---------------------------------------------------------
                 # EXTENDED HOURS LOGIC (Updated: Toggle Priority + Time Fallback)

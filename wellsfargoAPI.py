@@ -600,7 +600,7 @@ async def fetch_initial_account_data(page: uc.Tab, wf_brokerage_obj: Brokerage, 
     except Exception as e:
         await wellsfargo_error(f"Error fetching initial account data for {account_name_key}: {e}", page, discord_loop)
 
-async def _select_dropdown_option(page, dropdown_opener_selector, option_value, timeout=5):
+async def _select_dropdown_option(page, dropdown_opener_selector, option_value, timeout=10):
     """
     Helper to select an option from a custom dropdown.
     """
@@ -687,7 +687,7 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 await page.get(trade_url)
                 await page.wait_for_ready_state("complete")
                 await page.wait()
-                await page.select("#eqentryfrm", timeout=5)
+                await page.select("#eqentryfrm", timeout=10)
 
                 log(f"Processing order for stock: {stock_symbol} in account *{account_mask}")
                 action = orderObj.get_action().capitalize()
@@ -697,19 +697,25 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 printAndDiscord(f"Preparing to {action} {quantity} share(s) of {stock_symbol} for account ending in *{account_mask}.", discord_loop)
 
                 # 1. Select Action
-                await _select_dropdown_option(page, "#BuySellBtn", action)
+                try:
+                    log("Clicking dropdown '#BuySellBtn' and selecting '{action}'.")
+                    action_opener = await page.select("#BuySellBtn", timeout=10)
+                    await action_opener.scroll_into_view()
+                    await _select_dropdown_option(page, "#BuySellBtn", action)
+                except asyncio.TimeoutError:
+                    raise Exception("Failed to find the Action dropdown '#BuySellBtn'.")
 
                 # 2. Enter Symbol
                 try:
                     log(f"Entering symbol: {stock_symbol}")
-                    symbol_input = await page.select("#Symbol", timeout=5)
+                    symbol_input = await page.select("#Symbol", timeout=10)
                     await symbol_input.scroll_into_view()
                     await symbol_input.send_keys(stock_symbol)
 
                     await symbol_input.send_keys(SpecialKeys.TAB)
 
                     log("Waiting for quote to load...")
-                    await page.select("#prevdata", timeout=5)
+                    await page.select("#prevdata", timeout=10)
                 except asyncio.TimeoutError:
                     raise Exception("Failed to find symbol input field.")
 
@@ -718,7 +724,7 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     try:
                         log("Checking number of shares owned.")
                         # Selector for the span containing the number of shares
-                        shares_element = await page.select("#currentSharesOwned .numshares", timeout=5)
+                        shares_element = await page.select("#currentSharesOwned .numshares", timeout=10)
                         
                         if not shares_element:
                             raise Exception("Could not find the 'shares owned' element on the page.")
@@ -791,8 +797,13 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                     raise Exception("Failed to find the Quantity input field '#OrderQuantity'.")
                 
                 # 5. Select Order Type
-                await page.select("#OrderTypeBtn", timeout=10)
-                await _select_dropdown_option(page, "#OrderTypeBtn", order_type)
+                try:
+                    log("Clicking dropdown '#OrderTypeBtn' and selecting '{order_type}'.")
+                    ordertype = await page.select("#OrderTypeBtn", timeout=10)
+                    await ordertype.scroll_into_view()
+                    await _select_dropdown_option(page, "#OrderTypeBtn", order_type)
+                except asyncio.TimeoutError:
+                    raise Exception("Failed to find the Order Type dropdown '#OrderTypeBtn'.")
 
                 # 6. Enter Limit Price
                 if order_type == "Limit":
