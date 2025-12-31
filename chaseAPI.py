@@ -176,7 +176,7 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
                 browser_args.extend(["--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"])
             elif headless:
                 browser_args.extend(["--headless=new", "--window-size=1920,1080", 
-                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
                 "--disable-site-isolation-trials",
                 "--disable-features=IsolateOrigins,site-per-process",
                 "--disable-session-crashed-bubble",
@@ -192,7 +192,7 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
                 browser_args.extend([  
                     "--start-maximized",  
                     "--disable-session-crashed-bubble",
-                    "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+                    "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
                     "--disable-infobars",  
                     "--disable-features=TranslateUI,VizDisplayCompositor",
                     "--no-first-run",  
@@ -516,7 +516,7 @@ def get_base_headers():
         'x-jpmc-csrf-token': 'NONE',
         'x-jpmc-channel': 'id=C30',
         'origin': 'https://secure.chase.com',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
     }
 
 async def fetch_accounts_api(cookies, brokerage_obj: Brokerage, login_key, discord_loop):

@@ -94,7 +94,7 @@ def build_headers(csrf_token=None):
         'sec-fetch-mode': 'cors',
         'sec-fetch-site': 'same-origin',
         'sec-gpc': '1',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
         'x-requested-with': 'XMLHttpRequest',
     }
     if csrf_token:
@@ -215,7 +215,7 @@ async def _async_sofi_run_wrapper(accounts_env, brokerage_obj: Brokerage, action
                     "--disable-extensions",
                 ])
 
-            browser_args.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
+            browser_args.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
             browser_args.append("--force-device-scale-factor=0.8")
             
             profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenSoFi_{acc_idx + 1}"))
