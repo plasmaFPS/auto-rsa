@@ -687,7 +687,7 @@ async def wellsfargo_transaction(wf_brokerage_obj: Brokerage, orderObj: stockOrd
                 await page.get(trade_url)
                 await page.wait_for_ready_state("complete")
                 await page.wait()
-                await page.select("#cashavailablefortrading", timeout=5)
+                await page.select("#eqentryfrm", timeout=5)
 
                 log(f"Processing order for stock: {stock_symbol} in account *{account_mask}")
                 action = orderObj.get_action().capitalize()
