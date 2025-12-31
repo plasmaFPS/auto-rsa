@@ -1011,12 +1011,7 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                             await expand_btn.scroll_into_view()
                             await expand_btn.mouse_move()
                             await expand_btn.mouse_click()
-                            
-                            # Wait for the UI to refresh/expand
-                            await page.sleep(0.25)
-                            await page.wait_for_ready_state("complete")
-                            await page.wait()
-                            await page.sleep(0.25)
+                            await page.select("#show-fewer-trade-selections", timeout=1)
                         else:
                             log("Warning: 'View expanded ticket' button not found. Layout might differ or already strictly enforced.")
 
@@ -1027,31 +1022,30 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 log(f"Selecting Action: {action_upper}")
           
                 # 1. Open the dropdown
-                action_dropdown = await page.select("#dest-dropdownlist-button-action")
+                action_dropdown = await page.select("#dest-dropdownlist-button-action", timeout=10)
+                await action_dropdown.scroll_into_view()
                 await action_dropdown.mouse_move()
                 await action_dropdown.mouse_click()
-                await page.sleep(0.25)
                 
                 # 2. Robust Selection via JavaScript
                 # Fidelity uses specific IDs: #Action0 = Buy, #Action1 = Sell
                 if action_upper == "BUY":  
-                    buy_option = await page.select("#Action0")  
+                    buy_option = await page.select("#Action0", timeout=10)
+                    await buy_option.scroll_into_view()
                     await buy_option.mouse_move()
                     await buy_option.mouse_click()  
-                    await page.sleep(0.25)
                 elif action_upper == "SELL":  
-                    sell_option = await page.select("#Action1")  
+                    sell_option = await page.select("#Action1", timeout=10)
+                    await sell_option.scroll_into_view()
                     await sell_option.mouse_move()
                     await sell_option.mouse_click()
-                    await page.sleep(0.25)
                 
 
                 log(f"Entering Quantity: {quantity_val}")
-                qty_input = await page.select("#eqt-shared-quantity")
+                qty_input = await page.select("#eqt-shared-quantity", timeout=10)
                 if qty_input:
                     await qty_input.clear_input()
                     await qty_input.send_keys(str(quantity_val))
-                    await page.sleep(0.25)
 
                 order_type_to_use = "Market"
                 limit_price_to_use = None
@@ -1096,11 +1090,10 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                 log(f"Setting Order Type: {order_type_to_use}")
 
                 # 1. Open the Order Type Dropdown
-                type_dropdown = await page.select("#dest-dropdownlist-button-ordertype")
+                type_dropdown = await page.select("#dest-dropdownlist-button-ordertype", timeout=10)
                 await type_dropdown.mouse_move()
                 await type_dropdown.mouse_click()
-                await page.sleep(0.25)
-
+                
                 # 2. Select the specific option using mouse_click
                 # Mapping based on IDs: #Order-type0=Market, #Order-type1=Limit, #Order-type3=Stop Loss, #Order-type4=Stop Limit
                 
@@ -1118,29 +1111,28 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                     """)
                     
                     if target_id:
-                        option = await page.select(f"#{target_id}")
+                        option = await page.select(f"#{target_id}", timeout=10)
                         if option: await option.mouse_click()
                     else:
                         # Fallback if text search failed
                         fallback_id = "#Order-type0" if is_extended_time else "#Order-type1"
-                        option = await page.select(fallback_id)
+                        option = await page.select(fallback_id, timeout=10)
                         if option: await option.mouse_click()
                 elif order_type_to_use == "Stop Loss":
-                    option = await page.select("#Order-type3")
+                    option = await page.select("#Order-type3", timeout=10)
                     await option.mouse_click()
                 elif order_type_to_use == "Stop Limit":
-                    option = await page.select("#Order-type4")
+                    option = await page.select("#Order-type4", timeout=10)
                     await option.mouse_click()
                 else:
                     # Default to Market if "Market" or unknown
-                    option = await page.select("#Order-type0")
+                    option = await page.select("#Order-type0", timeout=10)
                     await option.mouse_click()
 
                 # 4. Handle Limit Price Input (Only if Limit was selected)
                 if order_type_to_use == "Limit":
                     # Wait a moment for the Limit Price input to appear/become active
-                    
-                    limit_input = await page.select("#eqt-mts-limit-price")  
+                    limit_input = await page.select("#eqt-mts-limit-price", timeout=10)  
                     await limit_input.mouse_click()
                     await limit_input.focus()
                     await limit_input.clear_input_by_deleting()
@@ -1148,7 +1140,6 @@ async def fidelity_transaction(page, brokerage_obj, orderObj, name, loop):
                         limit_price_to_use = current_price
                     await limit_input.send_keys(str(limit_price_to_use))
                     await page.mouse_click(0,0)
-                    await page.sleep(0.25)
 
                 log("Previewing Order...")
                 
