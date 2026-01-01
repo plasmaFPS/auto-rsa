@@ -635,51 +635,63 @@ async def fetch_holdings(page, brokerage_obj, name, loop):
 
     try:
         await set_download_path(page, download_dir)
+        await page.get(POSITIONS_URL)
+        await page.wait_for_ready_state("complete", timeout=10)
+        await page.wait()
+
+        kebab_menu = await page.select("[data-testid='kebab-menu']", timeout=10)
+
+        max_attempts = 20  # Prevent infinite loops  
+        attempts = 0  
+  
+        while attempts < max_attempts:  
+                try:  
+                    position = await kebab_menu.get_position()  
+                    if position is not None:  
+                        break  
+                except Exception as e:  
+                    log("element not loaded yet waiting")  
+                  
+                await page.sleep(0.25)  
+                attempts += 1
+  
+        if attempts >= max_attempts:  
+            raise Exception("Timeout waiting for element position")
+
+        log("Selected kebab menu")
+        await kebab_menu.scroll_into_view()
+        log("Scrolling into view")
+        await kebab_menu.mouse_move()
+        log("Moving mouse")
+        await kebab_menu.mouse_click()
+        log("Clicking")
+
+        download_btn = await page.select("#kebabmenuitem-download", timeout=10)
+        max_attempts = 20  # Prevent infinite loops  
+        attempts = 0  
+  
+        while attempts < max_attempts:  
+                try:  
+                    position = await download_btn.get_position()  
+                    if position is not None:  
+                        break  
+                except Exception as e:  
+                    log("element not loaded yet waiting")  
+                  
+                await page.sleep(0.25)  
+                attempts += 1
+  
+        if attempts >= max_attempts:  
+            raise Exception("Timeout waiting for element position")
         
-        if "positions" not in await get_current_url(page):
-            await page.get(POSITIONS_URL)
-            await page.sleep(0.25)
-            await page.wait_for_ready_state("complete")
-            await page.wait()
-            await page.sleep(0.25)
-            
-        await page.evaluate("""
-            (function() {
-                const buttons = document.querySelectorAll('button');
-                for (const btn of buttons) {
-                    if (btn.innerText.includes('Available Actions')) {
-                        btn.click();
-                        return;
-                    }
-                }
-                const uses = document.querySelectorAll('use');
-                for (const u of uses) {
-                    const href = u.getAttribute('href') || u.getAttribute('xlink:href') || '';
-                    if (href.includes('nav__overflow-vertical')) {
-                        const btn = u.closest('button');
-                        if (btn) {
-                            btn.click();
-                            return;
-                        }
-                    }
-                }
-            })();
-        """)
-        
-        await page.sleep(2)
-        
-        await page.evaluate("""
-            (function() {
-               const buttons = document.querySelectorAll('button, [role="menuitem"]');
-               for (const btn of buttons) {
-                   if (btn.innerText.trim() === 'Download') {
-                       btn.click();
-                       return;
-                   }
-               }
-            })();
-        """)
-        
+        log("Found download button")
+        await download_btn.scroll_into_view()
+        log("Scrolling into view")
+        await download_btn.mouse_move()
+        log("Moving mouse")
+        await download_btn.mouse_click()
+        log("Clicking")
+
         log("Waiting for CSV download...")
         downloaded_file = None
         for _ in range(30):
