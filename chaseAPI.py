@@ -205,7 +205,6 @@ async def _async_chase_run_wrapper(accounts_env, brokerage_obj: Brokerage, actio
             browser_args.append("--force-device-scale-factor=0.8")
 
             log(f"Starting browser for {account_name_key}...")
-            await clean_existing_chrome_processes()
             browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
             page = await browser.get(LOGIN_URL) if not browser.tabs else await browser.tabs[0].get(LOGIN_URL)
 

@@ -4,18 +4,6 @@ import os
 from time import sleep
 import psutil
 import traceback
-
-async def clean_existing_chrome_processes():  
-    """Kill any existing Chrome processes that might be from previous crashes"""  
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):  
-        try:  
-            if proc.info['name'] and 'chrome' in proc.info['name'].lower():  
-                cmdline = proc.info['cmdline']  
-                if cmdline and any('--remote-debugging-port' in arg for arg in cmdline):  
-                    print(f"Killing orphaned Chrome process: {proc.info['pid']}")  
-                    proc.kill()  
-        except (psutil.NoSuchProcess, psutil.AccessDenied):  
-            pass
 import zendriver as uc
 import pyotp
 from curl_cffi import requests
@@ -221,7 +209,6 @@ async def _async_sofi_run_wrapper(accounts_env, brokerage_obj: Brokerage, action
             profile_path = os.path.abspath(os.path.join(COOKIES_PATH, f"ZenSoFi_{acc_idx + 1}"))
             
             print(f"Starting browser for {account_name_key}...")
-            await clean_existing_chrome_processes()
             browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
             
             if not browser.tabs:

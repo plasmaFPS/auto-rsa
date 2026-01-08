@@ -29,18 +29,6 @@ def log(message):
 
 COOKIES_PATH = "creds"
 
-async def clean_existing_chrome_processes():  
-    """Kill any existing Chrome processes that might be from previous crashes"""  
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):  
-        try:  
-            if proc.info['name'] and 'chrome' in proc.info['name'].lower():  
-                cmdline = proc.info['cmdline']  
-                if cmdline and any('--remote-debugging-port' in arg for arg in cmdline):  
-                    print(f"Killing orphaned Chrome process: {proc.info['pid']}")  
-                    proc.kill()  
-        except (psutil.NoSuchProcess, psutil.AccessDenied):  
-            pass
-
 
 def create_creds_folder():
     """Create the 'creds' folder if it doesn't exist."""
@@ -352,7 +340,6 @@ async def _async_wellsfargo_run_wrapper(accounts_env, wf_brokerage_obj_to_popula
             browser_args.append("--force-device-scale-factor=0.8")
 
             log("Starting browser...")
-            await clean_existing_chrome_processes()
             browser = await uc.start(browser_args=browser_args, user_data_dir=profile_path)
             
             if not browser.tabs:
