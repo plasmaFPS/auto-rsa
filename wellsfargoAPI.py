@@ -515,7 +515,16 @@ async def fetch_initial_account_data(page: uc.Tab, wf_brokerage_obj: Brokerage, 
         await page.wait_for_ready_state("complete")
         await page.wait()
         await page.sleep(2)
-        await page.select("#account-summary", timeout=10)
+        try:
+            await page.select("#account-summary", timeout=10)
+        except asyncio.TimeoutError:
+            log("Timeout waiting for #account-summary. Reloading page and retrying...")
+            await page.reload()
+            await page.wait_for_ready_state("complete")
+            await page.wait()
+            await page.sleep(2)
+            # Try one more time, if this fails it will propagate to the main error handler
+            await page.select("#account-summary", timeout=10)
         current_url = await get_current_url(page, discord_loop)
         
         x_param_match = re.search(r'_x=([^&]+)', current_url)
